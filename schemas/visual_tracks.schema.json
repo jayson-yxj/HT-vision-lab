@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hightorque.local/schemas/visual_tracks.schema.json",
+  "title": "HT Vision Lab face tracks",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "session_id",
+    "source",
+    "processing",
+    "faces",
+    "tracklets",
+    "observations",
+    "active_speaker_segments",
+    "speaker_face_associations",
+    "statistics",
+    "warnings"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "session_id": {"type": "string", "minLength": 1},
+    "source": {"$ref": "#/$defs/source"},
+    "processing": {"$ref": "#/$defs/processing"},
+    "faces": {"type": "array", "items": {"$ref": "#/$defs/face"}},
+    "tracklets": {"type": "array", "items": {"$ref": "#/$defs/tracklet"}},
+    "observations": {"type": "array", "items": {"$ref": "#/$defs/observation"}},
+    "active_speaker_segments": {"type": "array", "items": {"$ref": "#/$defs/activeSpeakerSegment"}},
+    "speaker_face_associations": {"type": "array", "items": {"$ref": "#/$defs/speakerFaceAssociation"}},
+    "statistics": {"$ref": "#/$defs/statistics"},
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "duration_ms", "fps", "frame_count", "width", "height", "time_base"],
+      "properties": {
+        "path": {"type": "string"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "duration_ms": {"type": "integer", "minimum": 0},
+        "fps": {"type": "number", "exclusiveMinimum": 0},
+        "frame_count": {"type": "integer", "minimum": 0},
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1},
+        "time_base": {"const": "frame_index/fps"}
+      }
+    },
+    "processing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["created_at", "sample_fps", "sample_step_frames", "detector", "recognizer", "parameters", "elapsed_seconds"],
+      "properties": {
+        "created_at": {"type": "string", "format": "date-time"},
+        "sample_fps": {"type": "number", "exclusiveMinimum": 0},
+        "sample_step_frames": {"type": "integer", "minimum": 1},
+        "detector": {"$ref": "#/$defs/model"},
+        "recognizer": {"$ref": "#/$defs/model"},
+        "parameters": {"type": "object"},
+        "elapsed_seconds": {"type": "number", "minimum": 0}
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "filename", "sha256", "repository_revision", "license"],
+      "properties": {
+        "name": {"type": "string"},
+        "filename": {"type": "string"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "repository_revision": {"type": "string"},
+        "license": {"type": "string"}
+      }
+    },
+    "face": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["face_id", "first_seen_ms", "last_seen_ms", "visible_duration_ms", "observation_count", "tracklet_ids", "representative_observation_id", "evidence_image"],
+      "properties": {
+        "face_id": {"type": "string", "pattern": "^Face-[0-9]{2}$"},
+        "first_seen_ms": {"type": "integer", "minimum": 0},
+        "last_seen_ms": {"type": "integer", "minimum": 0},
+        "visible_duration_ms": {"type": "integer", "minimum": 0},
+        "observation_count": {"type": "integer", "minimum": 1},
+        "tracklet_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "representative_observation_id": {"type": "string"},
+        "evidence_image": {"type": "string"}
+      }
+    },
+    "tracklet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tracklet_id", "face_id", "start_ms", "end_ms", "observation_count", "observation_ids", "mean_detection_confidence", "representative_observation_id"],
+      "properties": {
+        "tracklet_id": {"type": "string"},
+        "face_id": {"type": ["string", "null"]},
+        "start_ms": {"type": "integer", "minimum": 0},
+        "end_ms": {"type": "integer", "minimum": 0},
+        "observation_count": {"type": "integer", "minimum": 1},
+        "observation_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "mean_detection_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "representative_observation_id": {"type": "string"}
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observation_id", "tracklet_id", "face_id", "frame_index", "timestamp_ms", "bbox_px", "bbox_normalized", "landmarks_px", "detection_confidence", "track_match_confidence", "quality"],
+      "properties": {
+        "observation_id": {"type": "string"},
+        "tracklet_id": {"type": "string"},
+        "face_id": {"type": ["string", "null"]},
+        "frame_index": {"type": "integer", "minimum": 0},
+        "timestamp_ms": {"type": "integer", "minimum": 0},
+        "bbox_px": {"$ref": "#/$defs/box"},
+        "bbox_normalized": {"$ref": "#/$defs/normalizedBox"},
+        "landmarks_px": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number"}}
+        },
+        "detection_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "track_match_confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "quality": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "box": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "prefixItems": [
+        {"type": "integer", "minimum": 0},
+        {"type": "integer", "minimum": 0},
+        {"type": "integer", "minimum": 1},
+        {"type": "integer", "minimum": 1}
+      ]
+    },
+    "normalizedBox": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {"type": "number", "minimum": 0, "maximum": 1}
+    },
+    "activeSpeakerSegment": {
+      "type": "object",
+      "required": ["face_id", "start_ms", "end_ms", "score"],
+      "properties": {
+        "face_id": {"type": ["string", "null"]},
+        "start_ms": {"type": "integer", "minimum": 0},
+        "end_ms": {"type": "integer", "minimum": 0},
+        "score": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "speakerFaceAssociation": {
+      "type": "object",
+      "required": ["speaker_label", "face_id", "confidence", "evidence_duration_ms", "status"],
+      "properties": {
+        "speaker_label": {"type": "string"},
+        "face_id": {"type": ["string", "null"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "evidence_duration_ms": {"type": "integer", "minimum": 0},
+        "status": {"enum": ["candidate", "confirmed", "ambiguous", "offscreen"]}
+      }
+    },
+    "statistics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sampled_frames", "detections", "retained_faces", "retained_tracklets", "discarded_tracklets"],
+      "properties": {
+        "sampled_frames": {"type": "integer", "minimum": 0},
+        "detections": {"type": "integer", "minimum": 0},
+        "retained_faces": {"type": "integer", "minimum": 0},
+        "retained_tracklets": {"type": "integer", "minimum": 0},
+        "discarded_tracklets": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}
