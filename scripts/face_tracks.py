@@ -26,6 +26,7 @@ COLORS: Sequence[Color] = (
     (79, 220, 220),
     (235, 191, 84),
 )
+MIN_SPATIAL_MATCH_SIMILARITY = 0.25
 
 
 def _normalized(vector: np.ndarray) -> np.ndarray:
@@ -141,7 +142,13 @@ class TrackManager:
                 for column, detection in enumerate(detections):
                     similarity = cosine_similarity(track.embedding, detection.embedding)
                     overlap = box_iou(track.last_box, detection.box)
-                    allowed = (overlap >= 0.20 and similarity >= 0.05) or similarity >= self.reid_threshold
+                    # A box can stay in the same place across a camera cut while the
+                    # person changes. Require some facial agreement even when IoU is
+                    # high, then use the stricter re-identification threshold when
+                    # the boxes do not overlap.
+                    allowed = similarity >= MIN_SPATIAL_MATCH_SIMILARITY and (
+                        overlap >= 0.20 or similarity >= self.reid_threshold
+                    )
                     if not allowed:
                         continue
                     costs[row, column] = 0.65 * (1.0 - similarity) + 0.30 * (1.0 - overlap) + 0.05 * gap_ratio
@@ -196,26 +203,38 @@ def cluster_tracklets(
     sample_period_ms: int,
 ) -> List[List[Tracklet]]:
     retained = [track for track in tracklets if len(track.observation_ids) >= min_observations]
-    retained.sort(key=lambda item: (-len(item.observation_ids), item.start_ms))
-    clusters: List[List[Tracklet]] = []
+    retained.sort(key=lambda item: (item.start_ms, item.tracklet_id))
+    clusters: List[List[Tracklet]] = [[tracklet] for tracklet in retained]
 
-    for tracklet in retained:
-        best_index = -1
-        best_similarity = -1.0
-        for index, members in enumerate(clusters):
-            if any(_temporal_overlap(tracklet, member, sample_period_ms) for member in members):
-                continue
-            # Complete-link matching prevents a weak bridge between two similar-looking
-            # people from contaminating an established identity cluster.
-            similarities = [cosine_similarity(tracklet.embedding, member.embedding) for member in members]
-            similarity = min(similarities)
-            if similarity >= threshold and similarity > best_similarity:
-                best_index = index
-                best_similarity = similarity
-        if best_index < 0:
-            clusters.append([tracklet])
-        else:
-            clusters[best_index].append(tracklet)
+    # Merge the strongest complete-link pair first. This lets two appearances of
+    # the same person join before a weaker lookalike edge is considered. If any
+    # members overlap in time, the clusters can never represent one identity.
+    while True:
+        best_pair: Optional[Tuple[int, int]] = None
+        best_similarity = threshold
+        for left_index, left_members in enumerate(clusters):
+            for right_index in range(left_index + 1, len(clusters)):
+                right_members = clusters[right_index]
+                if any(
+                    _temporal_overlap(left, right, sample_period_ms)
+                    for left in left_members
+                    for right in right_members
+                ):
+                    continue
+                similarity = min(
+                    cosine_similarity(left.embedding, right.embedding)
+                    for left in left_members
+                    for right in right_members
+                )
+                if similarity >= best_similarity:
+                    candidate = (left_index, right_index)
+                    if similarity > best_similarity or best_pair is None or candidate < best_pair:
+                        best_pair = candidate
+                        best_similarity = similarity
+        if best_pair is None:
+            break
+        left_index, right_index = best_pair
+        clusters[left_index].extend(clusters.pop(right_index))
 
     clusters.sort(key=lambda members: min(track.start_ms for track in members))
     observation_by_id = {item["observation_id"]: item for item in observations}
@@ -452,7 +471,7 @@ def analyze_video(
     detection_threshold: float = 0.70,
     min_face_size: int = 24,
     max_gap_seconds: float = 0.8,
-    reid_threshold: float = 0.55,
+    reid_threshold: float = 0.75,
     cluster_threshold: float = 0.45,
     min_track_observations: int = 3,
     max_people: int = 4,
@@ -471,7 +490,7 @@ def analyze_video(
     ):
         if not 0 <= value <= 1:
             raise ValueError(f"{name} must be between zero and one")
-    require_models()
+    require_models(["yunet", "sface"])
     video_path = video_path.expanduser().resolve()
     if not video_path.is_file():
         raise FileNotFoundError(video_path)
@@ -571,6 +590,7 @@ def analyze_video(
         "faces": faces,
         "tracklets": _tracklet_records(manager.tracklets),
         "observations": manager.observations,
+        "active_speaker_scores": [],
         "active_speaker_segments": [],
         "speaker_face_associations": [],
         "statistics": {
@@ -642,4 +662,34 @@ def validate_output(data: dict) -> List[str]:
         normalized_box = observation["bbox_normalized"]
         if len(normalized_box) != 4 or any(value < 0 or value > 1 for value in normalized_box):
             errors.append(f"{observation['observation_id']} has invalid normalized box")
+    active_scores = data.get("active_speaker_scores", [])
+    score_ids = [item["score_id"] for item in active_scores]
+    if len(score_ids) != len(set(score_ids)):
+        errors.append("duplicate active-speaker score ids")
+    for score in active_scores:
+        if score["face_id"] not in face_set:
+            errors.append(f"{score['score_id']} references unknown face")
+        if score["tracklet_id"] not in tracklet_set:
+            errors.append(f"{score['score_id']} references unknown tracklet")
+        if not 0 <= score["score"] <= 1:
+            errors.append(f"{score['score_id']} has invalid probability")
+    active_parameters = data.get("processing", {}).get("active_speaker_parameters", {})
+    if active_parameters.get("exclusive_speaker"):
+        speaking_buckets: Dict[int, str] = {}
+        for score in active_scores:
+            if not score["is_speaking"]:
+                continue
+            bucket = int(round(score["timestamp_ms"] / 40))
+            previous = speaking_buckets.setdefault(bucket, score["face_id"])
+            if previous != score["face_id"]:
+                errors.append(
+                    f"active-speaker bucket {bucket} contains both {previous} and {score['face_id']}"
+                )
+    for segment in data["active_speaker_segments"]:
+        if segment["face_id"] is not None and segment["face_id"] not in face_set:
+            errors.append(f"{segment.get('segment_id', 'active-speaker segment')} references unknown face")
+        if segment["start_ms"] >= segment["end_ms"]:
+            errors.append(f"{segment.get('segment_id', 'active-speaker segment')} has invalid time range")
+        if not set(segment.get("tracklet_ids", [])).issubset(tracklet_set):
+            errors.append(f"{segment.get('segment_id', 'active-speaker segment')} references unknown tracklets")
     return errors

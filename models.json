@@ -15,6 +15,20 @@
       "sha256": "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
       "size": 38696353,
       "license": "Apache-2.0"
+    },
+    "lr_asd_ava": {
+      "filename": "lr_asd_pretrain_ava.model",
+      "url": "https://github.com/Junhua-Liao/LR-ASD/raw/1b6dcd2d8fc2895683de6508ec6294ec47d388ca/weight/pretrain_AVA.model",
+      "sha256": "85e6c77fc981595234790d1e128ebb60352d37726b2445e0ef8891e2512fe9e3",
+      "size": 3426337,
+      "license": "MIT"
+    },
+    "lr_asd_talkset": {
+      "filename": "lr_asd_finetuning_talkset.model",
+      "url": "https://github.com/Junhua-Liao/LR-ASD/raw/1b6dcd2d8fc2895683de6508ec6294ec47d388ca/weight/finetuning_TalkSet.model",
+      "sha256": "6b4ef53694e874e96cf630198dc479c78aebb3993bbf166aee3d926dfe7d9342",
+      "size": 3426337,
+      "license": "MIT"
     }
   }
 }

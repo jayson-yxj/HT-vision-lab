@@ -5,7 +5,11 @@ root="$(cd "$(dirname "$0")" && pwd)"
 cd "$root"
 
 python_bin="python3"
-if [[ -x .venv/bin/python ]]; then
+if [[ "${1:-}" == "active-speaker" || "${1:-}" == "asd-status" ]]; then
+  if [[ -x .venv-asd/bin/python ]]; then
+    python_bin=.venv-asd/bin/python
+  fi
+elif [[ -x .venv/bin/python ]]; then
   python_bin=.venv/bin/python
 fi
 

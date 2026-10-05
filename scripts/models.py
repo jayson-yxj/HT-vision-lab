@@ -71,9 +71,10 @@ def fetch_models() -> None:
         print(f"[models] {name}: downloaded and verified")
 
 
-def require_models() -> None:
+def require_models(names=None) -> None:
     failures = []
-    for name in manifest()["models"]:
+    selected = names or manifest()["models"].keys()
+    for name in selected:
         valid, reason = verify_model(name)
         if not valid:
             failures.append(f"{name} ({reason})")
