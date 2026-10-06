@@ -18,7 +18,8 @@
 10. 使用 PySceneDetect 提取镜头和关键帧，并从已有的人脸轨迹生成画面位置与二维空间关系；
 11. 使用 Groq 上的 Qwen3.8 27B 结合关键帧、人物位置和对应转写，推断环境、物体与人物交互；
 12. 将语义相近的相邻镜头合并成稳定场景，并投影为人物—场景—物体—交互图；
-13. 在本地网页中交互查看场景时间轴、关系筛选、证据详情和标注关键帧。
+13. 将语音侧的话题、观点和意图按人物与话轮时间接入视觉场景图；
+14. 在本地网页中交互查看场景时间轴、关系筛选、证据详情和标注关键帧。
 
 人脸检测、特征与主动说话人模型在本地运行；场景语义分析通过 Groq 云 API 调用 Qwen3.8 27B。项目将本地模型 URL 固定到上游仓库的具体 Git revision，下载后校验文件大小和 SHA-256。YuNet 和 LR-ASD 为 MIT，SFace 为 Apache-2.0；详见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
@@ -159,6 +160,24 @@ bash setup-asd.sh
 
 页面会自动打开浏览器。点击时间轴可聚焦一个连续场景，人物、场景、物体及三类关系可分别筛选；点击节点或关系可检查时间、置信度和来源证据，点击场景中的缩略图可查看带 Face-ID 标注的原始关键帧。网页只提供图协议中列出的关键帧，不开放结果目录中的其他文件。
 
+将语音记忆接入场景图：
+
+```bash
+./lab build-conversation-graph \
+  results/example/multimodal_scene_graph.json \
+  /home/sunteng/Desktop/HighTorque_vision/HT-voice-lab/results/example/session_memory.json
+
+./lab validate-conversation-graph \
+  results/example/multimodal_conversation_graph.json
+
+./lab visualize-conversation-graph \
+  results/example/multimodal_conversation_graph.json \
+  --host 127.0.0.1 \
+  --port 8765
+```
+
+该步骤只读取版本化 JSON，不导入或调用 `HT-voice-lab` 的代码。系统通过 `multimodal_participant_context.json` 中记录的会话 ID 与 `session_memory.json` 哈希确认两条处理链属于同一场对话；人物 A/B/C/D 直接复用现有人物节点。每个观点按话轮与场景至少 120 毫秒的时间交集建立关系，跨场景的话轮会保留多条带覆盖比例的边，视觉范围以外的话轮仍进入会话图但不伪造场景关联。
+
 ## 输出
 
 ```text
@@ -168,6 +187,7 @@ results/example/
 ├── scene_context.json
 ├── scene_semantics.json
 ├── multimodal_scene_graph.json
+├── multimodal_conversation_graph.json
 ├── annotated.mp4
 ├── active_speaker.mp4
 ├── semantic_cache/
@@ -197,6 +217,8 @@ results/example/
 
 多模态场景图协议位于 [`schemas/multimodal_scene_graph.schema.json`](schemas/multimodal_scene_graph.schema.json)。人物和关键帧位置属于观察证据，环境、物体及交互属于推断证据；每个节点和边都保留时间范围、置信度与来源 ID。
 
+多模态会话图协议位于 [`schemas/multimodal_conversation_graph.schema.json`](schemas/multimodal_conversation_graph.schema.json)。它完整保留场景图节点与边，再加入话题、观点、意图以及 `expresses / about / has_intent / occurred_in / discussed_in` 关系，并记录语音记忆、参与者上下文、场景图和场景上下文的来源哈希。
+
 `faces` 是画面中的可见人物候选，不直接等于对话参与者。舞台远景、路人、插入镜头或静默听众可能使可见脸超过四张；使用 `active_speaker_segments` 可以筛出实际发言身份，而不删除原始视觉证据。
 
 ## 已验证样例
@@ -210,11 +232,12 @@ results/example/
 - Qwen 场景语义分析覆盖中文样例 4/4 张、英文样例 12/12 张关键帧；英文批量响应缺项时能够自动逐张重试并复用已成功缓存；
 - 中文 4 个镜头稳定合并为 1 个演播室场景；英文 12 个镜头合并为室内、片头、户外、室内 4 个连续场景，未把片头或户外镜头错误并入访谈室内；
 - 英文场景图网页已验证时间轴聚焦、节点与关系筛选、证据详情、关键帧缩略图和大图预览；
+- 英文前 60 秒视觉图已与同场 250 秒语音记忆融合，超出视觉范围的话轮保持可检索且不生成虚假场景关系；
 - 两条样例都通过结构引用、时间范围和单一说话者约束检查，主动说话视频保留原始音频。
 
 ## 后续顺序
 
-1. 将语音侧的话题、观点、意图图与视觉场景图组合；
-2. 建立跨会话人物档案、摄像头实时处理和人工纠错。
+1. 建立跨会话人物档案；
+2. 接入摄像头实时处理和人工纠错。
 
 语音基线固定为 `HT-voice-lab` 标签 `voice-baseline-2026-09-28`。

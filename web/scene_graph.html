@@ -16,6 +16,9 @@
       --person: #53d1c8;
       --scene: #a986ff;
       --object: #ffbf69;
+      --topic: #63d6ff;
+      --opinion: #ff8fad;
+      --intent: #9de47a;
       --observed: #63d6ff;
       --inferred: #d39cff;
       --warning: #ffdd7a;
@@ -67,6 +70,10 @@
     .toggle.person { color: var(--person); }
     .toggle.scene { color: var(--scene); }
     .toggle.object { color: var(--object); }
+    .toggle.topic { color: var(--topic); }
+    .toggle.opinion { color: var(--opinion); }
+    .toggle.intent { color: var(--intent); }
+    .toggle.dialogue { color: var(--opinion); }
     .toggle.interaction { color: var(--inferred); }
     .toggle.structure { color: var(--observed); }
     .toggle.identity { color: var(--warning); }
@@ -74,9 +81,12 @@
     .search { margin-left: auto; width: min(240px, 100%); padding: 8px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--text); outline: none; }
     .search:focus { border-color: var(--observed); }
     .graph-shell { min-width: 930px; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: rgba(10, 25, 36, .75); }
+    .graph-shell.conversation { min-width: 1220px; }
     .column-heads { display: grid; grid-template-columns: 30% 40% 30%; padding: 12px 42px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .14em; }
-    .column-heads span:nth-child(2) { text-align: center; }
-    .column-heads span:nth-child(3) { text-align: right; }
+    .column-heads.conversation { grid-template-columns: 20% 28% 32% 20%; }
+    .column-heads span:not(:first-child):not(:last-child) { text-align: center; }
+    .column-heads span:last-child { text-align: right; }
+    .column-heads:not(.conversation) span:nth-child(4) { display: none; }
     svg { display: block; width: 100%; min-height: 560px; }
     .edge { fill: none; stroke: #567183; stroke-width: 1.7; opacity: .58; pointer-events: none; transition: opacity .15s, stroke-width .15s; }
     .edge.inferred { stroke: var(--inferred); stroke-dasharray: 5 5; opacity: .42; }
@@ -89,6 +99,9 @@
     .node.person rect { stroke: var(--person); }
     .node.scene rect { stroke: var(--scene); }
     .node.object rect { stroke: var(--object); }
+    .node.topic rect { stroke: var(--topic); }
+    .node.opinion rect { stroke: var(--opinion); }
+    .node.intent rect { stroke: var(--intent); }
     .node text { fill: var(--text); pointer-events: none; }
     .node .subtitle { fill: var(--muted); font-size: 11px; }
     .empty { color: var(--muted); text-align: center; padding: 80px 20px; }
@@ -120,7 +133,7 @@
 <body>
   <header>
     <div class="headline-row">
-      <div><div class="eyebrow">HT Vision Lab</div><h1>多模态场景图</h1></div>
+      <div><div class="eyebrow">HT Vision Lab</div><h1 id="page-title">多模态场景图</h1></div>
       <div class="status"><span id="status-dot" class="status-dot"></span><span id="status">正在读取场景图</span></div>
     </div>
     <div id="stats" class="stats"></div>
@@ -135,15 +148,19 @@
         <button class="toggle person" data-node-filter="person" aria-pressed="true">人物</button>
         <button class="toggle scene" data-node-filter="scene" aria-pressed="true">场景</button>
         <button class="toggle object" data-node-filter="object" aria-pressed="true">物体</button>
+        <button class="toggle topic conversation-only" data-node-filter="topic" aria-pressed="true">话题</button>
+        <button class="toggle opinion conversation-only" data-node-filter="opinion" aria-pressed="true">观点</button>
+        <button class="toggle intent conversation-only" data-node-filter="intent" aria-pressed="true">意图</button>
         <button class="toggle interaction" data-edge-filter="interaction" aria-pressed="true">语义交互</button>
+        <button class="toggle dialogue conversation-only" data-edge-filter="dialogue" aria-pressed="true">对话关系</button>
         <button class="toggle structure" data-edge-filter="structure" aria-pressed="true">结构关系</button>
         <button class="toggle identity" data-edge-filter="identity" aria-pressed="true">身份候选</button>
         <button id="clear" class="clear-button">显示全部场景</button>
-        <input id="search" class="search" type="search" placeholder="搜索人物、场景或物体">
+        <input id="search" class="search" type="search" placeholder="搜索人物、话题、观点或场景">
       </div>
-      <div class="graph-shell">
-        <div class="column-heads"><span>人物</span><span>场景</span><span>物体</span></div>
-        <svg id="graph" role="img" aria-label="人物、场景、物体与交互关系图"></svg>
+      <div id="graph-shell" class="graph-shell">
+        <div id="column-heads" class="column-heads"><span>人物</span><span id="column-two">场景</span><span id="column-three">物体</span><span>意图</span></div>
+        <svg id="graph" role="img" aria-label="人物、场景、话题、观点、意图、物体与交互关系图"></svg>
       </div>
       <div id="empty" class="empty" hidden>当前筛选条件下没有可显示的节点。</div>
     </section>
@@ -166,16 +183,18 @@
   <script>
     const SVG = 'http://www.w3.org/2000/svg';
     const structural = new Set(['present_in', 'contains', 'followed_by']);
+    const dialogue = new Set(['expresses', 'about', 'has_intent', 'occurred_in', 'discussed_in']);
     const labels = {
-      person: '人物', scene: '场景', object: '物体', observed: '观察', inferred: '推断',
+      person: '人物', scene: '场景', object: '物体', topic: '话题', opinion: '观点', intent: '意图', observed: '观察', inferred: '推断',
       present_in: '出现在', contains: '包含', followed_by: '随后', identity_candidate: '身份候选',
+      expresses: '表达', about: '关于', has_intent: '意图', occurred_in: '发生于', discussed_in: '讨论于',
       speaking: '说话', listening: '倾听', presenting: '展示', showing: '展示', holding: '持有',
       using: '使用', pointing_to: '指向', sitting_with: '同坐', standing_with: '同站', touching: '接触', other: '其他'
     };
     const state = {
       payload: null, etag: '', selectedScene: null, selectedId: null,
-      nodeFilters: {person: true, scene: true, object: true},
-      edgeFilters: {interaction: true, structure: true, identity: true}, search: ''
+      nodeFilters: {person: true, scene: true, object: true, topic: true, opinion: true, intent: true},
+      edgeFilters: {interaction: true, dialogue: true, structure: true, identity: true}, search: ''
     };
 
     const byId = id => document.getElementById(id);
@@ -187,6 +206,7 @@
     const truncate = (value, size) => String(value || '').length > size ? String(value).slice(0, size - 1) + '…' : String(value || '');
     const valueText = value => Array.isArray(value) ? value.join('\n') : (value && typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value ?? '—'));
     const scenes = () => state.payload.graph.nodes.filter(node => node.type === 'scene').sort((a, b) => a.attributes.start_ms - b.attributes.start_ms);
+    const conversationMode = () => state.payload?.graph.context_type === 'multimodal_conversation_graph';
 
     function setStatus(message, error = false) {
       byId('status').textContent = message;
@@ -195,7 +215,16 @@
 
     function renderStats() {
       const stats = state.payload.graph.statistics;
-      const values = [['人物', stats.persons], ['场景', stats.scenes], ['物体', stats.objects], ['交互', stats.interactions], ['关系', stats.edges]];
+      const conversation = conversationMode();
+      byId('page-title').textContent = conversation ? '多模态会话图' : '多模态场景图';
+      byId('graph-shell').classList.toggle('conversation', conversation);
+      byId('column-heads').classList.toggle('conversation', conversation);
+      byId('column-two').textContent = conversation ? '场景 / 话题' : '场景';
+      byId('column-three').textContent = conversation ? '物体 / 观点' : '物体';
+      document.querySelectorAll('.conversation-only').forEach(item => { item.hidden = !conversation; });
+      const values = conversation
+        ? [['人物', stats.persons], ['场景', stats.scenes], ['话题', stats.topics], ['观点', stats.opinions], ['意图', stats.intents], ['关系', stats.edges]]
+        : [['人物', stats.persons], ['场景', stats.scenes], ['物体', stats.objects], ['交互', stats.interactions], ['关系', stats.edges]];
       byId('stats').replaceChildren(...values.map(([name, count]) => {
         const chip = document.createElement('span'); chip.className = 'chip';
         const strong = document.createElement('strong'); strong.textContent = count;
@@ -240,11 +269,17 @@
       if (range) {
         const [start, end] = range;
         const currentObjects = new Set(graph.nodes.filter(node => node.type === 'object' && node.attributes.scene_id === state.selectedScene).map(node => node.id));
+        const focusedOpinions = new Set(graph.edges.filter(edge => edge.predicate === 'occurred_in' && edge.target === state.selectedScene).map(edge => edge.source));
         candidateIds = new Set([state.selectedScene, ...currentObjects]);
         candidateEdges = graph.edges.filter(edge => {
           if (edge.predicate === 'followed_by') return false;
           if (edge.source === state.selectedScene || edge.target === state.selectedScene) return true;
           if (currentObjects.has(edge.source) || currentObjects.has(edge.target)) return true;
+          if (dialogue.has(edge.predicate)) {
+            if (edge.predicate === 'expresses' || edge.predicate === 'about') return focusedOpinions.has(edge.target);
+            if (edge.predicate === 'has_intent') return focusedOpinions.has(edge.source);
+            return false;
+          }
           return edge.predicate !== 'identity_candidate' && edge.end_ms > start && edge.start_ms < end;
         });
         for (const edge of candidateEdges) { candidateIds.add(edge.source); candidateIds.add(edge.target); }
@@ -259,25 +294,47 @@
         if (!visibleIds.has(edge.source) || !visibleIds.has(edge.target)) return false;
         if (edge.predicate === 'identity_candidate') return state.edgeFilters.identity;
         if (structural.has(edge.predicate)) return state.edgeFilters.structure;
+        if (dialogue.has(edge.predicate)) return state.edgeFilters.dialogue;
         return state.edgeFilters.interaction;
       });
       return {nodes: visibleNodes, edges: visibleEdges, allNodes};
     }
 
     function positionNodes(nodes) {
-      const groups = {person: [], scene: [], object: []};
+      const groups = {person: [], scene: [], object: [], topic: [], opinion: [], intent: []};
       nodes.forEach(node => groups[node.type].push(node));
       groups.person.sort((a, b) => a.label.localeCompare(b.label));
       groups.scene.sort((a, b) => a.attributes.start_ms - b.attributes.start_ms);
       groups.object.sort((a, b) => (a.attributes.scene_id || '').localeCompare(b.attributes.scene_id || '') || a.label.localeCompare(b.label));
-      const specs = {person: {x: 42, w: 220, step: 76}, scene: {x: 397, w: 330, step: 118}, object: {x: 860, w: 220, step: 70}};
+      groups.topic.sort((a, b) => a.label.localeCompare(b.label));
+      groups.opinion.sort((a, b) => a.attributes.start_ms - b.attributes.start_ms);
+      groups.intent.sort((a, b) => a.attributes.start_ms - b.attributes.start_ms || a.label.localeCompare(b.label));
+      const conversation = conversationMode();
+      const sceneStarts = new Map(groups.scene.map(node => [node.id, node.attributes.start_ms]));
+      const nodeStart = node => node.type === 'object' ? (sceneStarts.get(node.attributes.scene_id) ?? Number.MAX_SAFE_INTEGER) : (node.attributes.start_ms ?? Number.MAX_SAFE_INTEGER);
+      const timelineSort = (a, b) => nodeStart(a) - nodeStart(b) || a.type.localeCompare(b.type) || a.label.localeCompare(b.label);
+      const columns = conversation ? [
+        {x: 34, w: 210, nodes: groups.person},
+        {x: 302, w: 300, nodes: [...groups.scene, ...groups.topic].sort(timelineSort)},
+        {x: 670, w: 330, nodes: [...groups.object, ...groups.opinion].sort(timelineSort)},
+        {x: 1068, w: 260, nodes: groups.intent}
+      ] : [
+        {x: 42, w: 220, nodes: groups.person},
+        {x: 397, w: 330, nodes: groups.scene},
+        {x: 860, w: 220, nodes: groups.object}
+      ];
       const positions = new Map(); let height = 560;
-      for (const type of Object.keys(groups)) {
-        const spec = specs[type];
-        groups[type].forEach((node, index) => positions.set(node.id, {x: spec.x, y: 50 + index * spec.step, w: spec.w, h: type === 'scene' ? 78 : 58}));
-        height = Math.max(height, 100 + groups[type].length * spec.step);
+      for (const column of columns) {
+        let y = 50;
+        for (const node of column.nodes) {
+          const tall = ['scene', 'topic', 'opinion'].includes(node.type);
+          const h = tall ? 78 : 58;
+          positions.set(node.id, {x: column.x, y, w: column.w, h});
+          y += h + (node.type === 'scene' ? 30 : 18);
+        }
+        height = Math.max(height, y + 30);
       }
-      return {positions, height};
+      return {positions, height, width: conversation ? 1360 : 1120};
     }
 
     function pathFor(source, target) {
@@ -296,14 +353,24 @@
       return values.join(' ');
     }
 
+    function nodeSubtitle(node) {
+      if (node.type === 'scene') return `${formatTime(node.attributes.start_ms)}–${formatTime(node.attributes.end_ms)} · ${node.attributes.environment_category}`;
+      if (node.type === 'person') return node.attributes.speaker_label ? `说话人 ${node.attributes.speaker_label} · ${node.attributes.identity_status}` : node.attributes.identity_status;
+      if (node.type === 'object') return `数量 ${node.attributes.count} · ${(node.attributes.regions || []).join(' / ')}`;
+      if (node.type === 'topic') return `${(node.attributes.evidence_turn_ids || []).length} 个证据话轮`;
+      if (node.type === 'opinion') return `${node.attributes.speaker_label} · ${formatTime(node.attributes.start_ms)}–${formatTime(node.attributes.end_ms)}`;
+      if (node.type === 'intent') return `${(node.attributes.speaker_labels || []).join(' / ')} · ${(node.attributes.evidence_turn_ids || []).length} 个话轮`;
+      return '';
+    }
+
     function renderGraph() {
       const svg = byId('graph'); svg.replaceChildren();
       const {nodes, edges, allNodes} = graphSelection();
       byId('empty').hidden = nodes.length !== 0;
       byId('graph').parentElement.hidden = nodes.length === 0;
       if (!nodes.length) return;
-      const {positions, height} = positionNodes(nodes);
-      svg.setAttribute('viewBox', `0 0 1120 ${height}`);
+      const {positions, height, width} = positionNodes(nodes);
+      svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
       svg.style.height = `${height}px`;
       const defs = document.createElementNS(SVG, 'defs');
       const marker = document.createElementNS(SVG, 'marker');
@@ -328,9 +395,10 @@
         const box = positions.get(node.id);
         const group = document.createElementNS(SVG, 'g'); group.setAttribute('class', `node ${node.type}${state.selectedId === node.id ? ' selected' : ''}`); group.setAttribute('tabindex', '0'); group.setAttribute('role', 'button'); group.setAttribute('aria-label', `${labels[node.type] || node.type}：${node.label}`);
         const rect = document.createElementNS(SVG, 'rect'); rect.setAttribute('x', box.x); rect.setAttribute('y', box.y); rect.setAttribute('width', box.w); rect.setAttribute('height', box.h); rect.setAttribute('rx', '11');
-        const title = document.createElementNS(SVG, 'text'); title.setAttribute('x', box.x + 14); title.setAttribute('y', box.y + 24); title.setAttribute('font-size', node.type === 'scene' ? '14' : '13'); title.setAttribute('font-weight', '700'); title.textContent = truncate(node.label, node.type === 'scene' ? 36 : 25);
-        const subtitle = document.createElementNS(SVG, 'text'); subtitle.setAttribute('x', box.x + 14); subtitle.setAttribute('y', box.y + (node.type === 'scene' ? 52 : 43)); subtitle.setAttribute('class', 'subtitle');
-        subtitle.textContent = node.type === 'scene' ? `${formatTime(node.attributes.start_ms)}–${formatTime(node.attributes.end_ms)} · ${node.attributes.environment_category}` : node.type === 'person' ? (node.attributes.speaker_label ? `说话人 ${node.attributes.speaker_label} · ${node.attributes.identity_status}` : node.attributes.identity_status) : `数量 ${node.attributes.count} · ${node.attributes.regions.join(' / ')}`;
+        const tall = ['scene', 'topic', 'opinion'].includes(node.type);
+        const title = document.createElementNS(SVG, 'text'); title.setAttribute('x', box.x + 14); title.setAttribute('y', box.y + 24); title.setAttribute('font-size', node.type === 'scene' ? '14' : '13'); title.setAttribute('font-weight', '700'); title.textContent = truncate(node.label, tall ? 36 : 25);
+        const subtitle = document.createElementNS(SVG, 'text'); subtitle.setAttribute('x', box.x + 14); subtitle.setAttribute('y', box.y + (tall ? 52 : 43)); subtitle.setAttribute('class', 'subtitle');
+        subtitle.textContent = nodeSubtitle(node);
         group.append(rect, title, subtitle);
         const select = event => { event?.stopPropagation(); state.selectedId = node.id; if (node.type === 'scene') state.selectedScene = node.id; showNode(node); renderTimeline(); renderGraph(); };
         group.addEventListener('click', select); group.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') select(event); });

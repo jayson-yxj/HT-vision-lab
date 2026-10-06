@@ -19,9 +19,14 @@ PAGE = ROOT / "web" / "scene_graph.html"
 
 def _load_sources(graph_path: Path) -> Tuple[dict, dict, Dict[str, Path]]:
     graph = json.loads(graph_path.read_text(encoding="utf-8"))
-    errors = validate_scene_graph(graph)
+    if graph.get("context_type") == "multimodal_conversation_graph":
+        from .conversation_graph import validate_conversation_graph
+
+        errors = validate_conversation_graph(graph)
+    else:
+        errors = validate_scene_graph(graph)
     if errors:
-        raise ValueError("invalid scene graph: " + "; ".join(errors))
+        raise ValueError("invalid graph: " + "; ".join(errors))
     scene_source = graph["source"]["scene_context"]
     scene_path = Path(scene_source["path"]).expanduser().resolve()
     if not scene_path.is_file() or file_sha256(scene_path) != scene_source["sha256"]:
@@ -60,7 +65,7 @@ def create_server(
 ) -> Tuple[ThreadingHTTPServer, Path, str]:
     source = graph_path.expanduser().resolve()
     if not source.is_file():
-        raise FileNotFoundError("scene graph is missing: " + str(source))
+        raise FileNotFoundError("graph is missing: " + str(source))
     if not PAGE.is_file():
         raise FileNotFoundError("scene graph page is missing: " + str(PAGE))
     _load_sources(source)

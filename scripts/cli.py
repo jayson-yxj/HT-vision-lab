@@ -127,6 +127,19 @@ def _parser() -> argparse.ArgumentParser:
     )
     validate_graph.add_argument("json_path", type=Path)
 
+    conversation_graph = commands.add_parser(
+        "build-conversation-graph",
+        help="Fuse voice topics, opinions and intents into a multimodal scene graph",
+    )
+    conversation_graph.add_argument("scene_graph_json", type=Path)
+    conversation_graph.add_argument("session_memory_json", type=Path)
+    conversation_graph.add_argument("--output", type=Path)
+
+    validate_conversation_graph = commands.add_parser(
+        "validate-conversation-graph", help="Validate a multimodal conversation graph"
+    )
+    validate_conversation_graph.add_argument("json_path", type=Path)
+
     visualize_graph = commands.add_parser(
         "visualize-scene-graph", help="Serve the interactive multimodal scene graph"
     )
@@ -134,6 +147,15 @@ def _parser() -> argparse.ArgumentParser:
     visualize_graph.add_argument("--host", default="127.0.0.1")
     visualize_graph.add_argument("--port", type=int, default=8765)
     visualize_graph.add_argument("--no-open", action="store_true")
+
+    visualize_conversation = commands.add_parser(
+        "visualize-conversation-graph",
+        help="Serve the interactive multimodal conversation graph",
+    )
+    visualize_conversation.add_argument("graph_json", type=Path)
+    visualize_conversation.add_argument("--host", default="127.0.0.1")
+    visualize_conversation.add_argument("--port", type=int, default=8765)
+    visualize_conversation.add_argument("--no-open", action="store_true")
 
     participants = commands.add_parser(
         "project-participants",
@@ -398,7 +420,42 @@ def main() -> int:
                 return 1
             print(f"PASS: {args.json_path}")
             return 0
-        if args.command == "visualize-scene-graph":
+        if args.command == "build-conversation-graph":
+            from .conversation_graph import project_conversation_graph
+
+            data = project_conversation_graph(
+                args.scene_graph_json,
+                args.session_memory_json,
+                output_path=args.output,
+            )
+            output = (
+                args.output.expanduser().resolve()
+                if args.output
+                else args.scene_graph_json.expanduser().resolve().parent
+                / "multimodal_conversation_graph.json"
+            )
+            stats = data["statistics"]
+            print(f"[done] {output}")
+            print(
+                f"[conversation] persons={stats['persons']}, topics={stats['topics']}, "
+                f"opinions={stats['opinions']}, intents={stats['intents']}, "
+                f"scene-linked-turns={stats['temporally_linked_turns']}/{stats['opinions']}"
+            )
+            for warning in data["warnings"]:
+                print(f"[warning] {warning}")
+            return 0
+        if args.command == "validate-conversation-graph":
+            from .conversation_graph import validate_conversation_graph
+
+            with args.json_path.open(encoding="utf-8") as handle:
+                errors = validate_conversation_graph(json.load(handle))
+            if errors:
+                for error in errors:
+                    print(f"ERROR: {error}", file=sys.stderr)
+                return 1
+            print(f"PASS: {args.json_path}")
+            return 0
+        if args.command in {"visualize-scene-graph", "visualize-conversation-graph"}:
             from .scene_graph_server import serve_scene_graph
 
             return serve_scene_graph(
