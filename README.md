@@ -13,13 +13,14 @@
 5. 使用 LR-ASD TalkSet 权重融合嘴部运动和音频，为每张可见脸生成 25 FPS 的说话分数；
 6. 默认按首版“通常不会同时说话”的约束，每 40 毫秒只保留得分最高的人脸；
 7. 将 Sortformer 稳定后的 A/B/C/D 时间线与 Face-ID 做一对一重叠匹配，并保留全部候选证据。
-8. 将视觉身份投影到语音侧匿名参与者协议，保留已有个人信息并追加可追溯的多模态证据。
-9. 在发言时间线上区分 `visible / offscreen / occluded / unknown`，并用切镜检测避免把换镜误判成遮挡。
-10. 使用 PySceneDetect 提取镜头和关键帧，并从已有的人脸轨迹生成画面位置与二维空间关系；
-11. 使用 Groq 上的 Qwen3.8 27B 结合关键帧、人物位置和对应转写，推断环境、物体与人物交互；
-12. 将语义相近的相邻镜头合并成稳定场景，并投影为人物—场景—物体—交互图；
-13. 将语音侧的话题、观点和意图按人物与话轮时间接入视觉场景图；
-14. 在本地网页中交互查看场景时间轴、关系筛选、证据详情和标注关键帧。
+8. 用已确认的可见说话人逐条检查 A/B/C/D 串号，保留原时间线并生成可审计的纠正时间线；
+9. 将视觉身份投影到语音侧匿名参与者协议，保留已有个人信息并追加可追溯的多模态证据。
+10. 在发言时间线上区分 `visible / offscreen / occluded / unknown`，并用切镜检测避免把换镜误判成遮挡。
+11. 使用 PySceneDetect 提取镜头和关键帧，并从已有的人脸轨迹生成画面位置与二维空间关系；
+12. 使用 Groq 上的 Qwen3.8 27B 结合关键帧、人物位置和对应转写，推断环境、物体与人物交互；
+13. 将语义相近的相邻镜头合并成稳定场景，并投影为人物—场景—物体—交互图；
+14. 将语音侧的话题、观点和意图按人物与话轮时间接入视觉场景图；
+15. 在本地网页中交互查看场景时间轴、关系筛选、证据详情和标注关键帧。
 
 人脸检测、特征与主动说话人模型在本地运行；场景语义分析通过 Groq 云 API 调用 Qwen3.8 27B。项目将本地模型 URL 固定到上游仓库的具体 Git revision，下载后校验文件大小和 SHA-256。YuNet 和 LR-ASD 为 MIT，SFace 为 Apache-2.0；详见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
@@ -90,6 +91,18 @@ bash setup-asd.sh
 ```
 
 输入必须是声纹稳定后的 `A/B/C/D`，不接受原始 `speaker0…speaker3` 槽位。命令按时间重叠求全局一对一最优解，并输出 `confirmed`、`candidate`、`ambiguous` 或 `offscreen`。如果音频和视频片段起点不同，可用 `--timeline-offset-ms` 将语音时间整体平移后再匹配。
+
+如果同一个语音标签落到多张可见人脸，先保留上述初始绑定，再用确认的人脸锚点纠正明显串号：
+
+```bash
+./lab reconcile-speakers \
+  results/example/visual_tracks.json \
+  /path/to/speech_spans.json
+```
+
+命令不会修改原始 `speech_spans.json`，而是生成 `reconciled_speech_spans.json`，记录每条修改前后的说话人、Face-ID、时间、覆盖率和主动说话片段证据。它会迭代更新 `visual_tracks.json` 中的绑定，直到纠正集合稳定；默认只接受置信度不低于 0.70 的已确认人脸锚点，并要求至少 1.2 秒重叠、60% 话段覆盖率和 60% 人脸领先幅度。短促插话或视觉证据不足的话段保持原标签。
+
+如果产生了纠正，语音侧已有的 participant context、观点、意图和会话记忆仍包含旧说话人标签；后续集成应以 `reconciled_speech_spans.json` 重新生成这些语义结果，视觉模块不会静默改写原记忆。
 
 在人物发言期间分类可见性：
 
@@ -183,6 +196,7 @@ bash setup-asd.sh
 ```text
 results/example/
 ├── visual_tracks.json
+├── reconciled_speech_spans.json
 ├── multimodal_participant_context.json
 ├── scene_context.json
 ├── scene_semantics.json
@@ -209,6 +223,8 @@ results/example/
 - `speaker_face_associations`：A/B/C/D 与 Face-ID 的状态、覆盖率、纯度、第二候选差距和原始重叠证据。
 - `speaker_visibility_segments`：参与者在发言期间的可见、画外、疑似遮挡或未知状态。
 
+视觉辅助说话人纠正协议位于 [`schemas/reconciled_speaker_timeline.schema.json`](schemas/reconciled_speaker_timeline.schema.json)。它保留上游语音时间线的哈希、稳定视觉证据哈希和原始说话人，并只把满足阈值的视觉矛盾记录为独立 correction。
+
 融合人物协议位于 [`schemas/multimodal_participant_context.schema.json`](schemas/multimodal_participant_context.schema.json)，它复用语音侧的参与者、个人信息观察和证据对象，并增加 `visual_entities` 与人物—视觉身份关联。
 
 场景协议位于 [`schemas/scene_context.schema.json`](schemas/scene_context.schema.json)。它是从稳定视觉轨迹派生的独立文件，不会回写或改变 `visual_tracks.json`。
@@ -227,6 +243,7 @@ results/example/
 - 英文 720p、60 秒片段：修复跨镜头和短暂身份碎片后得到 4 个可见身份，同一时刻的静默人脸弱阳性已被排除；
 - 中文绑定得到 `A→Face-01`、`B→Face-02`、`C→Face-03`，三项均为 `confirmed`；英文 `A/B` 确认绑定，`C` 因同时积累到两个 Face-ID 的显著证据而标为 `ambiguous`；
 - 英文四人上下文中的 A/B/C/D 始终计为 4 位参与者；未确认绑定的 Face-ID 作为视觉证据保留，不会再被重复计成人物；
+- 英文 9 分 41 秒完整视频保持 4 个 Face-ID；视觉锚点纠正 4/77 条强证据发言后，得到 `A→Face-01`、`B→Face-04`、`C→Face-02`、`D→Face-03` 四项确认绑定；
 - 中文三位发言者均为 `visible`；英文 A/B 为 `visible`，C 因身份冲突保持 `unknown`，系统没有把冲突错误改写为画外或遮挡；
 - 中文 30 秒片段得到 4 个镜头，边界约为 8.72、21.04、28.32 秒；英文 60 秒片段得到 12 个镜头，其中纯片头画面正确记录为无人关键帧；
 - Qwen 场景语义分析覆盖中文样例 4/4 张、英文样例 12/12 张关键帧；英文批量响应缺项时能够自动逐张重试并复用已成功缓存；

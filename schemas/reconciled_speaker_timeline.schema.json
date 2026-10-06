@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hightorque.local/schemas/reconciled_speaker_timeline.schema.json",
+  "title": "HT Vision Lab reconciled speaker timeline",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "context_type", "session_id", "created_at", "source", "processing", "speech_spans", "corrections", "statistics", "warnings"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "context_type": {"const": "multimodal_speaker_timeline"},
+    "session_id": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["visual_tracks", "speech_timeline"],
+      "properties": {
+        "visual_tracks": {"$ref": "#/$defs/visualEvidenceFile"},
+        "speech_timeline": {"$ref": "#/$defs/sourceFile"}
+      }
+    },
+    "processing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "timeline_offset_ms", "min_anchor_confidence", "min_overlap_ms", "min_span_coverage", "min_face_dominance", "anchors"],
+      "properties": {
+        "algorithm": {"const": "confirmed_face_anchor_span_relabel_v1"},
+        "timeline_offset_ms": {"type": "integer"},
+        "min_anchor_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "min_overlap_ms": {"type": "integer", "minimum": 0},
+        "min_span_coverage": {"type": "number", "minimum": 0, "maximum": 1},
+        "min_face_dominance": {"type": "number", "minimum": 0, "maximum": 1},
+        "anchors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["speaker_label", "face_id", "confidence"],
+            "properties": {
+              "speaker_label": {"enum": ["A", "B", "C", "D"]},
+              "face_id": {"type": "string", "pattern": "^Face-[0-9]{2}$"},
+              "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+            }
+          }
+        }
+      }
+    },
+    "speech_spans": {"type": "array", "items": {"type": "object"}},
+    "corrections": {"type": "array", "items": {"$ref": "#/$defs/correction"}},
+    "statistics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input_spans", "eligible_spans", "visually_evidenced_spans", "corrected_spans", "corrected_duration_ms"],
+      "properties": {
+        "input_spans": {"type": "integer", "minimum": 0},
+        "eligible_spans": {"type": "integer", "minimum": 0},
+        "visually_evidenced_spans": {"type": "integer", "minimum": 0},
+        "corrected_spans": {"type": "integer", "minimum": 0},
+        "corrected_duration_ms": {"type": "integer", "minimum": 0}
+      }
+    },
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "visualEvidenceFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "evidence_sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "evidence_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "sourceFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "faceCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["face_id", "overlap_ms", "active_speaker_segment_ids"],
+      "properties": {
+        "face_id": {"type": "string", "pattern": "^Face-[0-9]{2}$"},
+        "overlap_ms": {"type": "integer", "minimum": 1},
+        "active_speaker_segment_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}}
+      }
+    },
+    "correction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["correction_id", "speech_span_id", "original_speaker", "resolved_speaker", "face_id", "start_ms", "end_ms", "overlap_ms", "span_coverage", "face_dominance", "anchor_confidence", "active_speaker_segment_ids", "candidate_faces"],
+      "properties": {
+        "correction_id": {"type": "string", "pattern": "^speaker-correction-[0-9]{4}$"},
+        "speech_span_id": {"type": "string", "minLength": 1},
+        "original_speaker": {"enum": ["A", "B", "C", "D"]},
+        "resolved_speaker": {"enum": ["A", "B", "C", "D"]},
+        "face_id": {"type": "string", "pattern": "^Face-[0-9]{2}$"},
+        "start_ms": {"type": "integer", "minimum": 0},
+        "end_ms": {"type": "integer", "minimum": 1},
+        "overlap_ms": {"type": "integer", "minimum": 1},
+        "span_coverage": {"type": "number", "minimum": 0, "maximum": 1},
+        "face_dominance": {"type": "number", "minimum": 0, "maximum": 1},
+        "anchor_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "active_speaker_segment_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+        "candidate_faces": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/faceCandidate"}}
+      }
+    }
+  }
+}

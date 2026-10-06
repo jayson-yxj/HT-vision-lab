@@ -66,6 +66,19 @@ def _parser() -> argparse.ArgumentParser:
     binding.add_argument("--min-speaker-coverage", type=float, default=0.50)
     binding.add_argument("--min-margin", type=float, default=0.40)
 
+    reconciliation = commands.add_parser(
+        "reconcile-speakers",
+        help="Use confirmed visible speakers to correct conflicting A/B/C/D spans",
+    )
+    reconciliation.add_argument("visual_json", type=Path)
+    reconciliation.add_argument("speech_json", type=Path)
+    reconciliation.add_argument("--output", type=Path)
+    reconciliation.add_argument("--timeline-offset-ms", type=int, default=0)
+    reconciliation.add_argument("--min-anchor-confidence", type=float, default=0.70)
+    reconciliation.add_argument("--min-overlap-ms", type=int, default=1200)
+    reconciliation.add_argument("--min-span-coverage", type=float, default=0.60)
+    reconciliation.add_argument("--min-face-dominance", type=float, default=0.60)
+
     visibility = commands.add_parser(
         "classify-visibility",
         help="Classify speaking participants as visible, offscreen, occluded or unknown",
@@ -283,6 +296,50 @@ def main() -> int:
                     f"({association['status']}, confidence={association['confidence']:.3f}, "
                     f"evidence={association['evidence_duration_ms'] / 1000:.2f}s)"
                 )
+            return 0
+        if args.command == "reconcile-speakers":
+            from .speaker_reconciliation import reconcile_and_rebind
+
+            data, visual, passes = reconcile_and_rebind(
+                args.visual_json,
+                args.speech_json,
+                output_path=args.output,
+                timeline_offset_ms=args.timeline_offset_ms,
+                min_anchor_confidence=args.min_anchor_confidence,
+                min_overlap_ms=args.min_overlap_ms,
+                min_span_coverage=args.min_span_coverage,
+                min_face_dominance=args.min_face_dominance,
+            )
+            output = (
+                args.output.expanduser().resolve()
+                if args.output
+                else args.visual_json.expanduser().resolve().parent
+                / "reconciled_speech_spans.json"
+            )
+            print(f"[done] {output}")
+            for correction in data["corrections"]:
+                print(
+                    f"[correction] {correction['speech_span_id']} "
+                    f"{correction['original_speaker']} -> "
+                    f"{correction['resolved_speaker']} via "
+                    f"{correction['face_id']} "
+                    f"({correction['span_coverage']:.1%} span coverage)"
+                )
+            stats = data["statistics"]
+            print(
+                f"[reconciliation] {stats['corrected_spans']}/"
+                f"{stats['eligible_spans']} eligible spans corrected; "
+                f"stable after {passes} passes"
+            )
+            for association in visual["speaker_face_associations"]:
+                print(
+                    f"[binding] {association['speaker_label']} -> "
+                    f"{association['face_id'] or 'offscreen'} "
+                    f"({association['status']}, "
+                    f"confidence={association['confidence']:.3f})"
+                )
+            for warning in data["warnings"]:
+                print(f"[warning] {warning}")
             return 0
         if args.command == "classify-visibility":
             from .visibility import classify_visibility
