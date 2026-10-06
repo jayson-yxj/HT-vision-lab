@@ -214,10 +214,17 @@ def _tracks_cooccur(
         "timestamp_ms" in item for item in [*left_values, *right_values]
     ):
         tolerance = sample_period_ms // 2
+        left_times = [item["timestamp_ms"] for item in left_values]
         right_times = [item["timestamp_ms"] for item in right_values]
-        for left_item in left_values:
-            if any(abs(left_item["timestamp_ms"] - value) <= tolerance for value in right_times):
+        left_index = right_index = 0
+        while left_index < len(left_times) and right_index < len(right_times):
+            difference = left_times[left_index] - right_times[right_index]
+            if abs(difference) <= tolerance:
                 return True
+            if difference < 0:
+                left_index += 1
+            else:
+                right_index += 1
         return False
     return _temporal_overlap(left, right, sample_period_ms)
 
@@ -293,6 +300,11 @@ def cluster_tracklets(
             tracklet
         )
     clusters: List[List[Tracklet]] = list(grouped.values())
+    cooccurring_pairs = set()
+    for left_index, left in enumerate(retained):
+        for right in retained[left_index + 1 :]:
+            if _tracks_cooccur(left, right, observation_by_id, sample_period_ms):
+                cooccurring_pairs.add(frozenset((left.tracklet_id, right.tracklet_id)))
 
     # Merge the strongest centroid pair first. Actual same-frame co-occurrence is
     # a hard cannot-link constraint, while brief low-quality fragments may bridge
@@ -304,7 +316,7 @@ def cluster_tracklets(
             for right_index in range(left_index + 1, len(clusters)):
                 right_members = clusters[right_index]
                 if any(
-                    _tracks_cooccur(left, right, observation_by_id, sample_period_ms)
+                    frozenset((left.tracklet_id, right.tracklet_id)) in cooccurring_pairs
                     for left in left_members
                     for right in right_members
                 ):
