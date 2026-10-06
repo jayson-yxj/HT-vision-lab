@@ -15,6 +15,7 @@
 7. 将 Sortformer 稳定后的 A/B/C/D 时间线与 Face-ID 做一对一重叠匹配，并保留全部候选证据。
 8. 将视觉身份投影到语音侧匿名参与者协议，保留已有个人信息并追加可追溯的多模态证据。
 9. 在发言时间线上区分 `visible / offscreen / occluded / unknown`，并用切镜检测避免把换镜误判成遮挡。
+10. 使用 PySceneDetect 提取镜头和关键帧，并从已有的人脸轨迹生成画面位置与二维空间关系。
 
 所有模型在本地运行。模型 URL 固定到上游仓库的具体 Git revision，下载后校验文件大小和 SHA-256。YuNet 和 LR-ASD 为 MIT，SFace 为 Apache-2.0；详见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
@@ -104,14 +105,32 @@ bash setup-asd.sh
 
 默认生成 `multimodal_participant_context.json`。命令会先用说话人、时间和原文校验两份输入来自同一场对话；已确认的人脸关系写为 `confirmed`，冲突候选写为 `disputed`。原有姓名、属性观察和语音证据保持不变，未知字段继续为空。
 
+从已有视觉轨迹生成场景上下文：
+
+```bash
+./lab analyze-scenes results/example/visual_tracks.json
+```
+
+默认生成 `scene_context.json` 和 `keyframes/`。每个镜头选择一张兼顾清晰度与可见人物的关键帧，记录 Face-ID、已确认的 A/B/C/D、归一化位置，以及 `left_of`、`above`、`co_visible_with`、`visually_close_to` 和画面重叠关系。关系只描述二维画面，不推断现实距离；首版有意不测量头部朝向。
+
+检查场景协议：
+
+```bash
+./lab validate-scenes results/example/scene_context.json
+```
+
 ## 输出
 
 ```text
 results/example/
 ├── visual_tracks.json
 ├── multimodal_participant_context.json
+├── scene_context.json
 ├── annotated.mp4
 ├── active_speaker.mp4
+├── keyframes/
+│   ├── keyframe-00001.jpg
+│   └── keyframe-00001-annotated.jpg
 └── evidence/
     ├── Face-01.jpg
     └── Face-02.jpg
@@ -129,6 +148,8 @@ results/example/
 
 融合人物协议位于 [`schemas/multimodal_participant_context.schema.json`](schemas/multimodal_participant_context.schema.json)，它复用语音侧的参与者、个人信息观察和证据对象，并增加 `visual_entities` 与人物—视觉身份关联。
 
+场景协议位于 [`schemas/scene_context.schema.json`](schemas/scene_context.schema.json)。它是从稳定视觉轨迹派生的独立文件，不会回写或改变 `visual_tracks.json`。
+
 `faces` 是画面中的可见人物候选，不直接等于对话参与者。舞台远景、路人、插入镜头或静默听众可能使可见脸超过四张；使用 `active_speaker_segments` 可以筛出实际发言身份，而不删除原始视觉证据。
 
 ## 已验证样例
@@ -138,11 +159,12 @@ results/example/
 - 中文绑定得到 `A→Face-01`、`B→Face-02`、`C→Face-03`，三项均为 `confirmed`；英文 `A/B` 确认绑定，`C` 因同时积累到两个 Face-ID 的显著证据而标为 `ambiguous`；
 - 英文四人上下文投影得到 6 个视觉实体、2 条确认关联、2 条争议关联、5 个可见性事件和 13 条多模态证据；未在 60 秒片段中发言的 D 保持匿名且不产生视觉绑定；
 - 中文三位发言者均为 `visible`；英文 A/B 为 `visible`，C 因身份冲突保持 `unknown`，系统没有把冲突错误改写为画外或遮挡；
+- 中文 30 秒片段得到 4 个镜头，边界约为 8.72、21.04、28.32 秒；英文 60 秒片段得到 12 个镜头，其中纯片头画面正确记录为无人关键帧；
 - 两条样例都通过结构引用、时间范围和单一说话者约束检查，主动说话视频保留原始音频。
 
 ## 后续顺序
 
-1. 加入关键帧场景、人物姿态和二维空间关系；
+1. 使用 Qwen3.8 27B 分析关键帧中的环境、物体和人物交互；
 2. 建立跨会话人物档案、摄像头实时处理和人工纠错。
 
 语音基线固定为 `HT-voice-lab` 标签 `voice-baseline-2026-09-28`。

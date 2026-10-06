@@ -76,6 +76,25 @@ def _parser() -> argparse.ArgumentParser:
     visibility.add_argument("--occlusion-max-ms", type=int, default=1200)
     visibility.add_argument("--boundary-tolerance-ms", type=int, default=240)
 
+    scenes = commands.add_parser(
+        "analyze-scenes",
+        help="Extract shots, keyframes, person positions and 2D spatial relations",
+    )
+    scenes.add_argument("visual_json", type=Path)
+    scenes.add_argument("--output", type=Path)
+    scenes.add_argument("--adaptive-threshold", type=float, default=3.0)
+    scenes.add_argument("--min-content-val", type=float, default=15.0)
+    scenes.add_argument("--min-shot-seconds", type=float, default=0.5)
+    scenes.add_argument("--horizontal-threshold", type=float, default=0.08)
+    scenes.add_argument("--vertical-threshold", type=float, default=0.08)
+    scenes.add_argument("--near-threshold", type=float, default=0.35)
+    scenes.add_argument("--overlap-iou-threshold", type=float, default=0.10)
+
+    validate_scenes = commands.add_parser(
+        "validate-scenes", help="Validate a visual scene context"
+    )
+    validate_scenes.add_argument("json_path", type=Path)
+
     participants = commands.add_parser(
         "project-participants",
         help="Project visual identities into an existing participant context",
@@ -223,6 +242,44 @@ def main() -> int:
                     for state in ("visible", "offscreen", "occluded", "unknown")
                 )
             )
+            return 0
+        if args.command == "analyze-scenes":
+            from .scene_context import analyze_scenes
+
+            data = analyze_scenes(
+                args.visual_json,
+                output_path=args.output,
+                adaptive_threshold=args.adaptive_threshold,
+                min_content_val=args.min_content_val,
+                min_shot_seconds=args.min_shot_seconds,
+                horizontal_threshold=args.horizontal_threshold,
+                vertical_threshold=args.vertical_threshold,
+                near_threshold=args.near_threshold,
+                overlap_iou_threshold=args.overlap_iou_threshold,
+            )
+            output = (
+                args.output.expanduser().resolve()
+                if args.output
+                else args.visual_json.expanduser().resolve().parent / "scene_context.json"
+            )
+            stats = data["statistics"]
+            print(f"[done] {output}")
+            print(
+                f"[scenes] {stats['shots']} shots, {stats['keyframes']} keyframes, "
+                f"{stats['person_states']} person states, "
+                f"{stats['spatial_relations']} spatial relations"
+            )
+            return 0
+        if args.command == "validate-scenes":
+            from .scene_context import validate_scene_context
+
+            with args.json_path.open(encoding="utf-8") as handle:
+                errors = validate_scene_context(json.load(handle))
+            if errors:
+                for error in errors:
+                    print(f"ERROR: {error}", file=sys.stderr)
+                return 1
+            print(f"PASS: {args.json_path}")
             return 0
         if args.command == "project-participants":
             from .multimodal_context import project_multimodal_context
