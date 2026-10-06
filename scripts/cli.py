@@ -48,6 +48,22 @@ def _parser() -> argparse.ArgumentParser:
         help="Allow more than one visible active speaker at the same time",
     )
     active.add_argument("--no-render", action="store_true")
+
+    binding = commands.add_parser(
+        "bind-speakers", help="Bind stabilized A/B/C/D speech intervals to visual Face IDs"
+    )
+    binding.add_argument("visual_json", type=Path)
+    binding.add_argument("speech_json", type=Path)
+    binding.add_argument("--output", type=Path)
+    binding.add_argument(
+        "--timeline-offset-ms",
+        type=int,
+        default=0,
+        help="Milliseconds added to speech timestamps before matching",
+    )
+    binding.add_argument("--min-evidence-ms", type=int, default=1000)
+    binding.add_argument("--min-speaker-coverage", type=float, default=0.50)
+    binding.add_argument("--min-margin", type=float, default=0.40)
     return parser
 
 
@@ -133,6 +149,31 @@ def main() -> int:
             print(f"[done] {output}")
             if not args.no_render:
                 print(f"[done] {output.parent / 'active_speaker.mp4'}")
+            return 0
+        if args.command == "bind-speakers":
+            from .speaker_face_binding import bind_speakers_to_faces
+
+            data = bind_speakers_to_faces(
+                args.visual_json,
+                args.speech_json,
+                output_path=args.output,
+                timeline_offset_ms=args.timeline_offset_ms,
+                min_evidence_ms=args.min_evidence_ms,
+                min_speaker_coverage=args.min_speaker_coverage,
+                min_margin=args.min_margin,
+            )
+            errors = validate_output(data)
+            if errors:
+                raise RuntimeError("output validation failed: " + "; ".join(errors))
+            output = args.output.expanduser().resolve() if args.output else args.visual_json.expanduser().resolve()
+            print(f"[done] {output}")
+            for association in data["speaker_face_associations"]:
+                print(
+                    f"[binding] {association['speaker_label']} -> "
+                    f"{association['face_id'] or 'offscreen'} "
+                    f"({association['status']}, confidence={association['confidence']:.3f}, "
+                    f"evidence={association['evidence_duration_ms'] / 1000:.2f}s)"
+                )
             return 0
     except (FileNotFoundError, RuntimeError, ValueError) as error:
         print(f"ERROR: {error}", file=sys.stderr)

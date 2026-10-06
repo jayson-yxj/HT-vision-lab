@@ -631,6 +631,7 @@ def validate_output(data: dict) -> List[str]:
         "faces",
         "tracklets",
         "observations",
+        "active_speaker_scores",
         "active_speaker_segments",
         "speaker_face_associations",
         "statistics",
@@ -685,6 +686,9 @@ def validate_output(data: dict) -> List[str]:
                 errors.append(
                     f"active-speaker bucket {bucket} contains both {previous} and {score['face_id']}"
                 )
+    active_segment_ids = {
+        item.get("segment_id") for item in data["active_speaker_segments"] if item.get("segment_id")
+    }
     for segment in data["active_speaker_segments"]:
         if segment["face_id"] is not None and segment["face_id"] not in face_set:
             errors.append(f"{segment.get('segment_id', 'active-speaker segment')} references unknown face")
@@ -692,4 +696,35 @@ def validate_output(data: dict) -> List[str]:
             errors.append(f"{segment.get('segment_id', 'active-speaker segment')} has invalid time range")
         if not set(segment.get("tracklet_ids", [])).issubset(tracklet_set):
             errors.append(f"{segment.get('segment_id', 'active-speaker segment')} references unknown tracklets")
+    associations = data["speaker_face_associations"]
+    association_ids = [item["association_id"] for item in associations]
+    speaker_labels = [item["speaker_label"] for item in associations]
+    assigned_faces = [item["face_id"] for item in associations if item["face_id"] is not None]
+    if len(association_ids) != len(set(association_ids)):
+        errors.append("duplicate speaker-face association ids")
+    if len(speaker_labels) != len(set(speaker_labels)):
+        errors.append("duplicate speaker labels in speaker-face associations")
+    if len(assigned_faces) != len(set(assigned_faces)):
+        errors.append("a face is assigned to more than one speaker")
+    for association in associations:
+        label = association["association_id"]
+        face_id = association["face_id"]
+        if face_id is not None and face_id not in face_set:
+            errors.append(f"{label} references unknown face")
+        if association["status"] == "confirmed" and face_id is None:
+            errors.append(f"{label} is confirmed without a face")
+        if not 0 <= association["confidence"] <= 1:
+            errors.append(f"{label} has invalid confidence")
+        for candidate in association.get("candidate_faces", []):
+            if candidate["face_id"] not in face_set:
+                errors.append(f"{label} candidate references unknown face")
+        evidence_duration = 0
+        for evidence in association.get("evidence", []):
+            if evidence["active_speaker_segment_id"] not in active_segment_ids:
+                errors.append(f"{label} evidence references unknown active-speaker segment")
+            if evidence["end_ms"] - evidence["start_ms"] != evidence["duration_ms"]:
+                errors.append(f"{label} evidence has inconsistent duration")
+            evidence_duration += evidence["duration_ms"]
+        if evidence_duration != association["evidence_duration_ms"]:
+            errors.append(f"{label} evidence duration does not match its summary")
     return errors
