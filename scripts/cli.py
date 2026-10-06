@@ -141,6 +141,11 @@ def _parser() -> argparse.ArgumentParser:
     semantics.add_argument("--groq-proxy")
     semantics.add_argument("--minimum-interval", type=float, default=0.2)
     semantics.add_argument("--batch-size", type=int, choices=(1, 2, 3), default=2)
+    semantics.add_argument(
+        "--visual-reuse-threshold",
+        type=float,
+        help="Analyze representative frames and reuse semantics below this visual distance",
+    )
 
     validate_semantics = commands.add_parser(
         "validate-scene-semantics", help="Validate Qwen scene semantics"
@@ -463,6 +468,7 @@ def main() -> int:
                 proxy=args.groq_proxy,
                 minimum_interval=args.minimum_interval,
                 batch_size=args.batch_size,
+                visual_reuse_threshold=args.visual_reuse_threshold,
                 progress=lambda message: print(f"[semantics] {message}", flush=True),
             )
             output = (
@@ -475,6 +481,7 @@ def main() -> int:
             print(
                 f"[semantics] status={data['status']}, "
                 f"keyframes={stats['analyzed_keyframes']}/{stats['keyframes']}, "
+                f"model={stats['model_analyzed_keyframes']}, reused={stats['reused_keyframes']}, "
                 f"objects={stats['semantic_objects']}, interactions={stats['interactions']}"
             )
             for warning in data["warnings"]:

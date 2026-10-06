@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence, Tuple
+
+import cv2
 
 from .groq_client import chat_completion
 from .models import file_sha256
@@ -229,6 +232,133 @@ def _frame_metadata(scene: dict, keyframe: dict, speech: Sequence[dict]) -> dict
     }
 
 
+def _visual_reuse_plan(
+    scene_path: Path, scene: dict, max_distance: Optional[float]
+) -> Tuple[List[dict], dict]:
+    keyframes = scene["keyframes"]
+    if max_distance is None:
+        return keyframes, {
+            item["keyframe_id"]: {
+                "source_keyframe_id": item["keyframe_id"],
+                "visual_similarity": 1.0,
+            }
+            for item in keyframes
+        }
+    if not 0 <= max_distance <= 1:
+        raise ValueError("visual reuse threshold must be between zero and one")
+    clusters = []
+    assignments = {}
+    for keyframe in keyframes:
+        image_path = (scene_path.parent / keyframe["image_path"]).resolve()
+        image = cv2.imread(str(image_path))
+        if image is None:
+            raise FileNotFoundError(f"keyframe is unavailable: {image_path}")
+        image = image[: max(1, int(image.shape[0] * 0.82))]
+        image = cv2.resize(image, (160, 90), interpolation=cv2.INTER_AREA)
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        histogram = cv2.calcHist(
+            [hsv], [0, 1, 2], None, [16, 8, 8], [0, 180, 0, 256, 0, 256]
+        )
+        cv2.normalize(histogram, histogram)
+        nearest = min(
+            (
+                (
+                    cv2.compareHist(
+                        histogram, cluster["histogram"], cv2.HISTCMP_BHATTACHARYYA
+                    ),
+                    cluster,
+                )
+                for cluster in clusters
+            ),
+            default=(float("inf"), None),
+            key=lambda item: item[0],
+        )
+        if nearest[1] is None or nearest[0] > max_distance:
+            cluster = {"histogram": histogram, "representative": keyframe}
+            clusters.append(cluster)
+            distance = 0.0
+        else:
+            distance, cluster = nearest
+        assignments[keyframe["keyframe_id"]] = {
+            "source_keyframe_id": cluster["representative"]["keyframe_id"],
+            "visual_similarity": round(1.0 - float(distance), 6),
+        }
+    return [item["representative"] for item in clusters], assignments
+
+
+def _transcript_interactions(metadata: dict) -> List[dict]:
+    faces_by_speaker = {
+        item["speaker_label"]: item["face_id"]
+        for item in metadata["visible_people"]
+        if item["speaker_label"]
+    }
+    interactions = []
+    for speaker in dict.fromkeys(item["speaker_label"] for item in metadata["transcript"]):
+        face_id = faces_by_speaker.get(speaker)
+        if face_id is None:
+            continue
+        interactions.append(
+            {
+                "subject_ref": face_id,
+                "predicate": "speaking",
+                "object_ref": "group",
+                "description": f"{face_id} is speaking during this shot.",
+                "evidence_basis": ["transcript"],
+                "epistemic_status": "inferred",
+                "confidence": 0.9,
+            }
+        )
+    return interactions
+
+
+def _expand_visual_reuse(
+    model_analyses: Sequence[dict], scene: dict, speech: Sequence[dict], reuse_plan: dict
+) -> Tuple[List[dict], int, int]:
+    by_keyframe = {item["keyframe_id"]: item for item in model_analyses}
+    expanded = []
+    object_count = interaction_count = 0
+    for keyframe in scene["keyframes"]:
+        reuse = reuse_plan[keyframe["keyframe_id"]]
+        source = by_keyframe.get(reuse["source_keyframe_id"])
+        if source is None:
+            continue
+        similarity = reuse["visual_similarity"]
+        if source["keyframe_id"] == keyframe["keyframe_id"]:
+            analysis = copy.deepcopy(source)
+            semantic_source = "model"
+        else:
+            environment = copy.deepcopy(source["environment"])
+            environment["confidence"] = round(environment["confidence"] * similarity, 6)
+            objects = []
+            for item in source["objects"]:
+                copied = copy.deepcopy(item)
+                copied["confidence"] = round(copied["confidence"] * similarity, 6)
+                objects.append(copied)
+            analysis = {
+                "keyframe_id": keyframe["keyframe_id"],
+                "shot_id": keyframe["shot_id"],
+                "environment": environment,
+                "objects": objects,
+                "interactions": _transcript_interactions(
+                    _frame_metadata(scene, keyframe, speech)
+                ),
+            }
+            semantic_source = "visual_reuse"
+        analysis["analysis_id"] = f"scene-analysis-{len(expanded) + 1:06d}"
+        analysis["semantic_source"] = semantic_source
+        analysis["source_keyframe_id"] = source["keyframe_id"]
+        analysis["visual_similarity"] = similarity
+        for item in analysis["objects"]:
+            object_count += 1
+            item["semantic_object_id"] = f"semantic-object-{object_count:06d}"
+        for item in analysis["interactions"]:
+            interaction_count += 1
+            item["interaction_id"] = f"interaction-{interaction_count:06d}"
+            item["epistemic_status"] = "inferred"
+        expanded.append(analysis)
+    return expanded, object_count, interaction_count
+
+
 def _image_data_url(path: Path) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(path.read_bytes()).decode("ascii")
 
@@ -355,6 +485,43 @@ def _cached_request(
     return raw, request_hash, False
 
 
+def _seed_cached_analyses(
+    cache_dir: Path,
+    model: str,
+    scene_path: Path,
+    scene: dict,
+    speech: Sequence[dict],
+    representative_ids: set,
+) -> dict:
+    """Recover individual representatives from valid older batch cache entries."""
+    keyframes = {item["keyframe_id"]: item for item in scene["keyframes"]}
+    recovered = {}
+    for cache_path in sorted(cache_dir.glob("*.json"), key=lambda path: path.stat().st_mtime):
+        cached = json.loads(cache_path.read_text(encoding="utf-8"))
+        raw = cached.get("analyses")
+        if not isinstance(raw, list) or not raw:
+            continue
+        identifiers = [item.get("keyframe_id") for item in raw if isinstance(item, dict)]
+        if len(identifiers) != len(raw) or any(identifier not in keyframes for identifier in identifiers):
+            continue
+        selected = [keyframes[identifier] for identifier in identifiers]
+        metadata = [_frame_metadata(scene, item, speech) for item in selected]
+        image_paths = [
+            (scene_path.parent / item["annotated_image_path"]).resolve()
+            for item in selected
+        ]
+        expected = _request_hash(model, metadata, image_paths)
+        if cache_path.stem != expected or cached.get("request_sha256") != expected:
+            continue
+        for item in raw:
+            if item["keyframe_id"] in representative_ids:
+                recovered[item["keyframe_id"]] = {
+                    "analysis": item,
+                    "request_sha256": expected,
+                }
+    return recovered
+
+
 def _mark_batch_for_fallback(
     model: str,
     metadata: Sequence[dict],
@@ -375,6 +542,23 @@ def _mark_batch_for_fallback(
     )
 
 
+def _repair_graphic_environment(environment: dict, objects: Sequence[dict]) -> dict:
+    repaired = copy.deepcopy(environment)
+    labels = {str(item.get("label", "")).strip().lower() for item in objects}
+    if repaired.get("confidence", 0) <= 0.2 and labels & {
+        "logo",
+        "title",
+        "title card",
+        "graphic",
+    }:
+        repaired.update(
+            category="graphic_or_title",
+            description="Graphic or title card with a visible logo or title.",
+            confidence=0.6,
+        )
+    return repaired
+
+
 def _normalize_analyses(
     raw: Sequence[dict],
     scene: dict,
@@ -387,6 +571,7 @@ def _normalize_analyses(
     object_count, interaction_count = object_offset, interaction_offset
     for index, item in enumerate(raw, start=1):
         keyframe_id = item["keyframe_id"]
+        environment = _repair_graphic_environment(item["environment"], item["objects"])
         objects = []
         for value in item["objects"]:
             object_count += 1
@@ -416,7 +601,7 @@ def _normalize_analyses(
                 "analysis_id": f"scene-analysis-{analysis_offset + index:06d}",
                 "keyframe_id": keyframe_id,
                 "shot_id": keyframes[keyframe_id]["shot_id"],
-                "environment": {**item["environment"], "epistemic_status": "inferred"},
+                "environment": {**environment, "epistemic_status": "inferred"},
                 "objects": objects,
                 "interactions": interactions,
             }
@@ -432,6 +617,7 @@ def analyze_scene_semantics(
     proxy: Optional[str] = None,
     minimum_interval: float = 0.2,
     batch_size: int = 2,
+    visual_reuse_threshold: Optional[float] = None,
     transport: Optional[Callable[[dict], dict]] = None,
     progress: Optional[Callable[[str], None]] = None,
 ) -> dict:
@@ -463,7 +649,55 @@ def analyze_scene_semantics(
     analyzer = GroqSceneAnalyzer(model, timeout, proxy, minimum_interval, transport)
     analyses, requests, failed_batches = [], [], []
     object_count = interaction_count = 0
-    keyframes = scene["keyframes"]
+    all_keyframes = scene["keyframes"]
+    keyframes, reuse_plan = _visual_reuse_plan(
+        scene_path, scene, visual_reuse_threshold
+    )
+    if visual_reuse_threshold is not None:
+        warnings.append(
+            f"Visual reuse selected {len(keyframes)} representative keyframes for "
+            f"{len(all_keyframes)} total keyframes."
+        )
+        if progress:
+            progress(
+                f"selected {len(keyframes)} visual representatives for "
+                f"{len(all_keyframes)} keyframes"
+            )
+    seeded = _seed_cached_analyses(
+        cache_dir,
+        model,
+        scene_path,
+        scene,
+        speech,
+        {item["keyframe_id"] for item in keyframes},
+    )
+    for keyframe in keyframes:
+        cached = seeded.get(keyframe["keyframe_id"])
+        if cached is None:
+            continue
+        normalized, next_object_count, next_interaction_count = _normalize_analyses(
+            [cached["analysis"]],
+            scene,
+            len(analyses),
+            object_count,
+            interaction_count,
+        )
+        if _validate_analysis_refs(normalized, scene):
+            seeded.pop(keyframe["keyframe_id"], None)
+            continue
+        analyses.extend(normalized)
+        object_count, interaction_count = next_object_count, next_interaction_count
+        requests.append(
+            {
+                "batch_id": f"semantic-seed-{keyframe['keyframe_id']}",
+                "keyframe_ids": [keyframe["keyframe_id"]],
+                "request_sha256": cached["request_sha256"],
+                "cache_hit": True,
+            }
+        )
+    if seeded and progress:
+        progress(f"recovered {len(seeded)} representatives from compatible batch cache")
+    keyframes = [item for item in keyframes if item["keyframe_id"] not in seeded]
     stop = False
     for batch_number, start in enumerate(range(0, len(keyframes), batch_size), start=1):
         batch = keyframes[start : start + batch_size]
@@ -555,7 +789,15 @@ def analyze_scene_semantics(
             warnings.append(f"{batch_id} failed; rerun to resume from cached successful batches.")
             break
 
-    status = "complete" if not failed_batches and len(analyses) == len(keyframes) else "partial"
+    model_analysis_count = len(analyses)
+    analyses, object_count, interaction_count = _expand_visual_reuse(
+        analyses, scene, speech, reuse_plan
+    )
+    status = (
+        "complete"
+        if not failed_batches and len(analyses) == len(all_keyframes)
+        else "partial"
+    )
     data = {
         "schema_version": 1,
         "context_type": "visual_scene_semantics",
@@ -574,13 +816,21 @@ def analyze_scene_semantics(
             "model": model,
             "prompt_version": PROMPT_VERSION,
             "batch_size": batch_size,
+            "visual_reuse_threshold": visual_reuse_threshold,
+            "reuse_algorithm": (
+                "cropped_hsv_histogram_bhattacharyya_v1"
+                if visual_reuse_threshold is not None
+                else None
+            ),
         },
         "analyses": analyses,
         "requests": requests,
         "failed_batches": failed_batches,
         "statistics": {
-            "keyframes": len(keyframes),
+            "keyframes": len(all_keyframes),
             "analyzed_keyframes": len(analyses),
+            "model_analyzed_keyframes": model_analysis_count,
+            "reused_keyframes": len(analyses) - model_analysis_count,
             "semantic_objects": object_count,
             "interactions": interaction_count,
             "requests": len(requests),
@@ -664,6 +914,14 @@ def validate_scene_semantics(data: dict) -> List[str]:
     if data["status"] == "complete" and len(data["analyses"]) != data["statistics"]["keyframes"]:
         errors.append("complete semantics do not cover every keyframe")
     for analysis in data["analyses"]:
+        semantic_source = analysis.get("semantic_source")
+        if semantic_source not in {None, "model", "visual_reuse"}:
+            errors.append(f"{analysis['analysis_id']} has an invalid semantic source")
+        if semantic_source == "visual_reuse" and not analysis.get("source_keyframe_id"):
+            errors.append(f"{analysis['analysis_id']} has no reuse source keyframe")
+        similarity = analysis.get("visual_similarity")
+        if similarity is not None and not 0 <= similarity <= 1:
+            errors.append(f"{analysis['analysis_id']} has invalid visual similarity")
         environment = analysis["environment"]
         if environment.get("category") not in ENVIRONMENT_CATEGORIES:
             errors.append(f"{analysis['analysis_id']} has an invalid environment category")
@@ -691,6 +949,14 @@ def validate_scene_semantics(data: dict) -> List[str]:
         "requests": len(data["requests"]),
         "failed_batches": len(data["failed_batches"]),
     }
+    if "model_analyzed_keyframes" in data["statistics"]:
+        expected["model_analyzed_keyframes"] = sum(
+            item.get("semantic_source") in {None, "model"} for item in data["analyses"]
+        )
+    if "reused_keyframes" in data["statistics"]:
+        expected["reused_keyframes"] = sum(
+            item.get("semantic_source") == "visual_reuse" for item in data["analyses"]
+        )
     if data["statistics"] != expected:
         errors.append("statistics do not match scene semantics contents")
     return errors

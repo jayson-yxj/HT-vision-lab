@@ -49,7 +49,9 @@
         "name": {"const": "groq"},
         "model": {"type": "string", "minLength": 1},
         "prompt_version": {"const": "scene-semantics-qwen3.8-v2"},
-        "batch_size": {"type": "integer", "minimum": 1, "maximum": 3}
+        "batch_size": {"type": "integer", "minimum": 1, "maximum": 3},
+        "visual_reuse_threshold": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "reuse_algorithm": {"type": ["string", "null"]}
       }
     },
     "analysis": {
@@ -62,7 +64,10 @@
         "shot_id": {"type": "string"},
         "environment": {"$ref": "#/$defs/environment"},
         "objects": {"type": "array", "items": {"$ref": "#/$defs/semanticObject"}},
-        "interactions": {"type": "array", "items": {"$ref": "#/$defs/interaction"}}
+        "interactions": {"type": "array", "items": {"$ref": "#/$defs/interaction"}},
+        "semantic_source": {"enum": ["model", "visual_reuse"]},
+        "source_keyframe_id": {"type": "string"},
+        "visual_similarity": {"type": "number", "minimum": 0, "maximum": 1}
       }
     },
     "environment": {
@@ -135,7 +140,9 @@
         "semantic_objects": {"type": "integer", "minimum": 0},
         "interactions": {"type": "integer", "minimum": 0},
         "requests": {"type": "integer", "minimum": 0},
-        "failed_batches": {"type": "integer", "minimum": 0}
+        "failed_batches": {"type": "integer", "minimum": 0},
+        "model_analyzed_keyframes": {"type": "integer", "minimum": 0},
+        "reused_keyframes": {"type": "integer", "minimum": 0}
       }
     }
   }

@@ -153,12 +153,15 @@ bash setup-asd.sh
 ```bash
 ./lab analyze-scene-semantics \
   results/example/scene_context.json \
-  --groq-proxy http://127.0.0.1:7890
+  --groq-proxy http://127.0.0.1:7890 \
+  --visual-reuse-threshold 0.45
 
 ./lab validate-scene-semantics results/example/scene_semantics.json
 ```
 
 命令优先读取 `GROQ_API_KEY`，其次读取本项目通过 `./lab login-groq` 保存的密钥，最后兼容已有的 `~/.config/ht-voice-lab/groq.key`。默认每次发送两张关键帧，以适配 Groq 当前的输入速率限制；批量响应缺少关键帧时会自动改为逐张重试。成功响应缓存在 `semantic_cache/`，网络中断后再次运行即可从未完成处继续。
+
+重复机位较多的长视频可使用 `--visual-reuse-threshold 0.45`：系统裁掉字幕区后比较关键帧的 HSV 颜色分布，只把每组代表帧发送给 Qwen；相似镜头复用代表帧的环境和物体结果，置信度按视觉相似度折减，人物发言关系则从该镜头自己的纠正转写重新建立。每条结果记录 `semantic_source`、`source_keyframe_id` 和 `visual_similarity`，不会把复用结果伪装成独立模型调用。短片或镜头差异较大的视频可以不启用。
 
 `scene_semantics.json` 中的环境、物体和交互全部标为 `inferred`。系统只允许交互引用当前关键帧可见的 Face-ID，并过滤“对物体 speaking/listening”等不合理关系；它不会从外貌推断真实身份、性格、情绪、意图、视线或头部朝向。
 

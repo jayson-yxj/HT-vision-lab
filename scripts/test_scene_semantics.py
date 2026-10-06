@@ -8,7 +8,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from scripts.scene_semantics import analyze_scene_semantics, validate_scene_semantics
+from scripts.scene_semantics import (
+    _repair_graphic_environment,
+    analyze_scene_semantics,
+    validate_scene_semantics,
+)
 
 
 def _sha(path: Path) -> str:
@@ -54,6 +58,7 @@ def _write_fixture(root: Path) -> Path:
     for index in (1, 2):
         frame = np.full((80, 120, 3), 40 * index, dtype=np.uint8)
         cv2.putText(frame, f"Face-0{index}", (5, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+        cv2.imwrite(str(keyframe_dir / f"keyframe-0000{index}.jpg"), frame)
         cv2.imwrite(str(keyframe_dir / f"keyframe-0000{index}-annotated.jpg"), frame)
     scene = {
         "schema_version": 1,
@@ -247,7 +252,80 @@ def test_missing_batched_keyframe_falls_back_to_single_images() -> None:
         assert all(item["cache_hit"] for item in cached["requests"])
 
 
+def test_similar_frames_reuse_model_environment_without_copying_interactions() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        scene_path = _write_fixture(root)
+        calls = []
+
+        def fake_transport(payload):
+            calls.append(payload)
+            content = payload["messages"][1]["content"]
+            assert sum(item["type"] == "image_url" for item in content) == 1
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "keyframes": [
+                                        {
+                                            "keyframe_id": "keyframe-00001",
+                                            "environment": {
+                                                "category": "indoor_meeting",
+                                                "description": "会议空间",
+                                                "confidence": 0.9,
+                                            },
+                                            "objects": [
+                                                {
+                                                    "label": "screen",
+                                                    "count": 1,
+                                                    "region": "background",
+                                                    "confidence": 0.8,
+                                                }
+                                            ],
+                                            "interactions": [],
+                                        }
+                                    ]
+                                },
+                                ensure_ascii=False,
+                            )
+                        }
+                    }
+                ]
+            }
+
+        result = analyze_scene_semantics(
+            scene_path,
+            transport=fake_transport,
+            visual_reuse_threshold=1.0,
+        )
+        assert result["status"] == "complete"
+        assert len(calls) == 1
+        assert result["statistics"]["model_analyzed_keyframes"] == 1
+        assert result["statistics"]["reused_keyframes"] == 1
+        reused = result["analyses"][1]
+        assert reused["semantic_source"] == "visual_reuse"
+        assert reused["source_keyframe_id"] == "keyframe-00001"
+        assert reused["objects"][0]["label"] == "screen"
+        assert reused["interactions"] == []
+
+
+def test_low_confidence_logo_frame_is_classified_as_graphic() -> None:
+    repaired = _repair_graphic_environment(
+        {"category": "outdoor_public", "description": "无可见环境", "confidence": 0.0},
+        [{"label": "logo", "confidence": 0.0}],
+    )
+    assert repaired == {
+        "category": "graphic_or_title",
+        "description": "Graphic or title card with a visible logo or title.",
+        "confidence": 0.6,
+    }
+
+
 if __name__ == "__main__":
     test_qwen_batches_images_transcript_and_cache()
     test_missing_batched_keyframe_falls_back_to_single_images()
+    test_similar_frames_reuse_model_environment_without_copying_interactions()
+    test_low_confidence_logo_frame_is_classified_as_graphic()
     print("PASS: Qwen scene semantics image batching, transcript evidence and cache")

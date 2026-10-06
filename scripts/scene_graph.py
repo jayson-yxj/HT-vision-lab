@@ -149,11 +149,11 @@ def project_scene_graph(
         raise ValueError("scene similarity threshold must be between zero and one")
     semantics_path = semantics_path.expanduser().resolve()
     semantics = json.loads(semantics_path.read_text(encoding="utf-8"))
+    if semantics.get("status") != "complete":
+        raise ValueError("scene semantics must be complete before building the graph")
     semantic_errors = validate_scene_semantics(semantics)
     if semantic_errors:
         raise ValueError("invalid scene semantics: " + "; ".join(semantic_errors))
-    if semantics["status"] != "complete":
-        raise ValueError("scene semantics must be complete before building the graph")
 
     scene_path = Path(semantics["source"]["scene_context_path"]).expanduser().resolve()
     if not scene_path.is_file() or file_sha256(scene_path) != semantics["source"]["scene_context_sha256"]:
