@@ -16,7 +16,8 @@
 8. 将视觉身份投影到语音侧匿名参与者协议，保留已有个人信息并追加可追溯的多模态证据。
 9. 在发言时间线上区分 `visible / offscreen / occluded / unknown`，并用切镜检测避免把换镜误判成遮挡。
 10. 使用 PySceneDetect 提取镜头和关键帧，并从已有的人脸轨迹生成画面位置与二维空间关系；
-11. 使用 Groq 上的 Qwen3.8 27B 结合关键帧、人物位置和对应转写，推断环境、物体与人物交互。
+11. 使用 Groq 上的 Qwen3.8 27B 结合关键帧、人物位置和对应转写，推断环境、物体与人物交互；
+12. 将语义相近的相邻镜头合并成稳定场景，并投影为人物—场景—物体—交互图。
 
 人脸检测、特征与主动说话人模型在本地运行；场景语义分析通过 Groq 云 API 调用 Qwen3.8 27B。项目将本地模型 URL 固定到上游仓库的具体 Git revision，下载后校验文件大小和 SHA-256。YuNet 和 LR-ASD 为 MIT，SFace 为 Apache-2.0；详见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
@@ -134,6 +135,18 @@ bash setup-asd.sh
 
 `scene_semantics.json` 中的环境、物体和交互全部标为 `inferred`。系统只允许交互引用当前关键帧可见的 Face-ID，并过滤“对物体 speaking/listening”等不合理关系；它不会从外貌推断真实身份、性格、情绪、意图、视线或头部朝向。
 
+构建稳定场景和多模态关系图：
+
+```bash
+./lab build-scene-graph \
+  results/example/scene_semantics.json \
+  --participant-context results/example/multimodal_participant_context.json
+
+./lab validate-scene-graph results/example/multimodal_scene_graph.json
+```
+
+`--participant-context` 可选。提供后，图会用同一份 `visual_tracks.json` 的哈希校验两条处理链确实属于同一段视频，并把已有姓名和 participant ID 放入人物节点。只有 `confirmed` 的 A/B/C/D—Face-ID 绑定会合并为同一个人物；有争议的人物保持独立并以 `identity_candidate` 边保留候选及置信度，未绑定的人继续匿名。场景合并完全在本地执行，默认综合环境描述、物体和人物的相似度，不会增加云 API 调用。
+
 ## 输出
 
 ```text
@@ -142,6 +155,7 @@ results/example/
 ├── multimodal_participant_context.json
 ├── scene_context.json
 ├── scene_semantics.json
+├── multimodal_scene_graph.json
 ├── annotated.mp4
 ├── active_speaker.mp4
 ├── semantic_cache/
@@ -169,6 +183,8 @@ results/example/
 
 场景语义协议位于 [`schemas/scene_semantics.schema.json`](schemas/scene_semantics.schema.json)。它记录每次云端请求的模型、提示词版本、输入哈希、缓存命中和失败批次，并保留到原始场景、视觉轨迹及语音时间线的来源引用。
 
+多模态场景图协议位于 [`schemas/multimodal_scene_graph.schema.json`](schemas/multimodal_scene_graph.schema.json)。人物和关键帧位置属于观察证据，环境、物体及交互属于推断证据；每个节点和边都保留时间范围、置信度与来源 ID。
+
 `faces` 是画面中的可见人物候选，不直接等于对话参与者。舞台远景、路人、插入镜头或静默听众可能使可见脸超过四张；使用 `active_speaker_segments` 可以筛出实际发言身份，而不删除原始视觉证据。
 
 ## 已验证样例
@@ -180,11 +196,13 @@ results/example/
 - 中文三位发言者均为 `visible`；英文 A/B 为 `visible`，C 因身份冲突保持 `unknown`，系统没有把冲突错误改写为画外或遮挡；
 - 中文 30 秒片段得到 4 个镜头，边界约为 8.72、21.04、28.32 秒；英文 60 秒片段得到 12 个镜头，其中纯片头画面正确记录为无人关键帧；
 - Qwen 场景语义分析覆盖中文样例 4/4 张、英文样例 12/12 张关键帧；英文批量响应缺项时能够自动逐张重试并复用已成功缓存；
+- 中文 4 个镜头稳定合并为 1 个演播室场景；英文 12 个镜头合并为室内、片头、户外、室内 4 个连续场景，未把片头或户外镜头错误并入访谈室内；
 - 两条样例都通过结构引用、时间范围和单一说话者约束检查，主动说话视频保留原始音频。
 
 ## 后续顺序
 
-1. 将连续镜头的场景语义合并为稳定事件，并投影到统一的多模态人物—场景图；
-2. 建立跨会话人物档案、摄像头实时处理和人工纠错。
+1. 为多模态场景图增加本地交互式可视化和时间轴筛选；
+2. 将语音侧的话题、观点、意图图与视觉场景图组合；
+3. 建立跨会话人物档案、摄像头实时处理和人工纠错。
 
 语音基线固定为 `HT-voice-lab` 标签 `voice-baseline-2026-09-28`。

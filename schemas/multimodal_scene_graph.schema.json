@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hightorque.local/schemas/multimodal-scene-graph-v1.json",
+  "title": "HT multimodal scene graph",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "context_type", "session_id", "created_at", "source", "processing", "nodes", "edges", "statistics", "warnings"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "context_type": {"const": "multimodal_scene_graph"},
+    "session_id": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "source": {"$ref": "#/$defs/source"},
+    "processing": {"$ref": "#/$defs/processing"},
+    "nodes": {"type": "array", "items": {"$ref": "#/$defs/node"}},
+    "edges": {"type": "array", "items": {"$ref": "#/$defs/edge"}},
+    "statistics": {"$ref": "#/$defs/statistics"},
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "sourceFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scene_context", "scene_semantics", "visual_tracks", "participant_context"],
+      "properties": {
+        "scene_context": {"$ref": "#/$defs/sourceFile"},
+        "scene_semantics": {"$ref": "#/$defs/sourceFile"},
+        "visual_tracks": {"$ref": "#/$defs/sourceFile"},
+        "participant_context": {
+          "oneOf": [{"$ref": "#/$defs/sourceFile"}, {"type": "null"}]
+        }
+      }
+    },
+    "processing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scene_merger", "confirmed_speaker_bindings_only", "semantic_claims_are_inferred"],
+      "properties": {
+        "scene_merger": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["algorithm", "similarity_threshold", "description_weight", "object_weight", "person_weight"],
+          "properties": {
+            "algorithm": {"const": "adjacent_semantic_similarity_v1"},
+            "similarity_threshold": {"type": "number", "minimum": 0, "maximum": 1},
+            "description_weight": {"const": 0.55},
+            "object_weight": {"const": 0.3},
+            "person_weight": {"const": 0.15}
+          }
+        },
+        "confirmed_speaker_bindings_only": {"const": true},
+        "semantic_claims_are_inferred": {"const": true}
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "label", "epistemic_status", "confidence", "evidence_refs", "attributes"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "type": {"enum": ["person", "scene", "object"]},
+        "label": {"type": "string", "minLength": 1},
+        "epistemic_status": {"enum": ["observed", "inferred"]},
+        "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "evidence_refs": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "attributes": {"type": "object"}
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "source", "target", "predicate", "epistemic_status", "confidence", "start_ms", "end_ms", "evidence_refs", "attributes"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^edge-[0-9]{6}$"},
+        "source": {"type": "string", "minLength": 1},
+        "target": {"type": "string", "minLength": 1},
+        "predicate": {"type": "string", "minLength": 1},
+        "epistemic_status": {"enum": ["observed", "inferred"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "start_ms": {"type": "integer", "minimum": 0},
+        "end_ms": {"type": "integer", "minimum": 0},
+        "evidence_refs": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "attributes": {"type": "object"}
+      }
+    },
+    "statistics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nodes", "edges", "persons", "scenes", "objects", "interactions", "observed_edges", "inferred_edges"],
+      "properties": {
+        "nodes": {"type": "integer", "minimum": 0},
+        "edges": {"type": "integer", "minimum": 0},
+        "persons": {"type": "integer", "minimum": 0},
+        "scenes": {"type": "integer", "minimum": 0},
+        "objects": {"type": "integer", "minimum": 0},
+        "interactions": {"type": "integer", "minimum": 0},
+        "observed_edges": {"type": "integer", "minimum": 0},
+        "inferred_edges": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

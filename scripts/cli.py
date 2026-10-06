@@ -113,6 +113,20 @@ def _parser() -> argparse.ArgumentParser:
     )
     validate_semantics.add_argument("json_path", type=Path)
 
+    graph = commands.add_parser(
+        "build-scene-graph",
+        help="Merge adjacent shots and build a person-scene-object graph",
+    )
+    graph.add_argument("semantics_json", type=Path)
+    graph.add_argument("--participant-context", type=Path)
+    graph.add_argument("--output", type=Path)
+    graph.add_argument("--scene-similarity-threshold", type=float, default=0.20)
+
+    validate_graph = commands.add_parser(
+        "validate-scene-graph", help="Validate a multimodal scene graph"
+    )
+    validate_graph.add_argument("json_path", type=Path)
+
     participants = commands.add_parser(
         "project-participants",
         help="Project visual identities into an existing participant context",
@@ -336,6 +350,40 @@ def main() -> int:
 
             with args.json_path.open(encoding="utf-8") as handle:
                 errors = validate_scene_semantics(json.load(handle))
+            if errors:
+                for error in errors:
+                    print(f"ERROR: {error}", file=sys.stderr)
+                return 1
+            print(f"PASS: {args.json_path}")
+            return 0
+        if args.command == "build-scene-graph":
+            from .scene_graph import project_scene_graph
+
+            data = project_scene_graph(
+                args.semantics_json,
+                participant_context_path=args.participant_context,
+                output_path=args.output,
+                similarity_threshold=args.scene_similarity_threshold,
+            )
+            output = (
+                args.output.expanduser().resolve()
+                if args.output
+                else args.semantics_json.expanduser().resolve().parent
+                / "multimodal_scene_graph.json"
+            )
+            stats = data["statistics"]
+            print(f"[done] {output}")
+            print(
+                f"[graph] persons={stats['persons']}, scenes={stats['scenes']}, "
+                f"objects={stats['objects']}, interactions={stats['interactions']}, "
+                f"edges={stats['edges']}"
+            )
+            return 0
+        if args.command == "validate-scene-graph":
+            from .scene_graph import validate_scene_graph
+
+            with args.json_path.open(encoding="utf-8") as handle:
+                errors = validate_scene_graph(json.load(handle))
             if errors:
                 for error in errors:
                     print(f"ERROR: {error}", file=sys.stderr)
