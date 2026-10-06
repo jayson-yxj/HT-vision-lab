@@ -195,6 +195,81 @@ def _temporal_overlap(left: Tracklet, right: Tracklet, tolerance_ms: int) -> boo
     return overlap > tolerance_ms
 
 
+def _track_observations(track: Tracklet, observations: Dict[str, dict]) -> List[dict]:
+    return sorted(
+        (observations[identifier] for identifier in track.observation_ids),
+        key=lambda item: item.get("timestamp_ms", 0),
+    )
+
+
+def _tracks_cooccur(
+    left: Tracklet,
+    right: Tracklet,
+    observations: Dict[str, dict],
+    sample_period_ms: int,
+) -> bool:
+    left_values = _track_observations(left, observations)
+    right_values = _track_observations(right, observations)
+    if left_values and right_values and all(
+        "timestamp_ms" in item for item in [*left_values, *right_values]
+    ):
+        tolerance = sample_period_ms // 2
+        right_times = [item["timestamp_ms"] for item in right_values]
+        for left_item in left_values:
+            if any(abs(left_item["timestamp_ms"] - value) <= tolerance for value in right_times):
+                return True
+        return False
+    return _temporal_overlap(left, right, sample_period_ms)
+
+
+def _bridged_fragment_target(
+    fragment: Tracklet,
+    retained: Sequence[Tracklet],
+    observations: Dict[str, dict],
+    sample_period_ms: int,
+) -> Optional[Tracklet]:
+    if len(fragment.observation_ids) > 5:
+        return None
+    fragment_values = _track_observations(fragment, observations)
+    if not fragment_values or not all(
+        "timestamp_ms" in item and "bbox_px" in item for item in fragment_values
+    ):
+        return None
+    first, last = fragment_values[0], fragment_values[-1]
+    best: Optional[Tuple[float, Tracklet]] = None
+    for candidate in retained:
+        if candidate is fragment or len(candidate.observation_ids) < 6:
+            continue
+        candidate_values = _track_observations(candidate, observations)
+        if not candidate_values or not all(
+            "timestamp_ms" in item and "bbox_px" in item for item in candidate_values
+        ):
+            continue
+        before = [item for item in candidate_values if item["timestamp_ms"] < first["timestamp_ms"]]
+        after = [item for item in candidate_values if item["timestamp_ms"] > last["timestamp_ms"]]
+        if not before or not after:
+            continue
+        previous, following = before[-1], after[0]
+        if (
+            first["timestamp_ms"] - previous["timestamp_ms"] > sample_period_ms * 2
+            or following["timestamp_ms"] - last["timestamp_ms"] > sample_period_ms * 2
+        ):
+            continue
+        previous_overlap = box_iou(previous["bbox_px"], first["bbox_px"])
+        following_overlap = box_iou(last["bbox_px"], following["bbox_px"])
+        score = min(previous_overlap, following_overlap)
+        if score >= 0.35 and (best is None or score > best[0]):
+            best = (score, candidate)
+    return best[1] if best else None
+
+
+def _cluster_embedding(members: Sequence[Tracklet]) -> np.ndarray:
+    total = np.zeros_like(members[0].embedding)
+    for member in members:
+        total += member.embedding * max(1, len(member.observation_ids))
+    return _normalized(total)
+
+
 def cluster_tracklets(
     tracklets: Sequence[Tracklet],
     observations: Sequence[dict],
@@ -204,11 +279,24 @@ def cluster_tracklets(
 ) -> List[List[Tracklet]]:
     retained = [track for track in tracklets if len(track.observation_ids) >= min_observations]
     retained.sort(key=lambda item: (item.start_ms, item.tracklet_id))
-    clusters: List[List[Tracklet]] = [[tracklet] for tracklet in retained]
+    observation_by_id = {item["observation_id"]: item for item in observations}
+    fragment_targets = {}
+    for fragment in retained:
+        target = _bridged_fragment_target(
+            fragment, retained, observation_by_id, sample_period_ms
+        )
+        if target:
+            fragment_targets[fragment.tracklet_id] = target.tracklet_id
+    grouped: Dict[str, List[Tracklet]] = {}
+    for tracklet in retained:
+        grouped.setdefault(fragment_targets.get(tracklet.tracklet_id, tracklet.tracklet_id), []).append(
+            tracklet
+        )
+    clusters: List[List[Tracklet]] = list(grouped.values())
 
-    # Merge the strongest complete-link pair first. This lets two appearances of
-    # the same person join before a weaker lookalike edge is considered. If any
-    # members overlap in time, the clusters can never represent one identity.
+    # Merge the strongest centroid pair first. Actual same-frame co-occurrence is
+    # a hard cannot-link constraint, while brief low-quality fragments may bridge
+    # a longer track when position is continuous on both sides.
     while True:
         best_pair: Optional[Tuple[int, int]] = None
         best_similarity = threshold
@@ -216,15 +304,13 @@ def cluster_tracklets(
             for right_index in range(left_index + 1, len(clusters)):
                 right_members = clusters[right_index]
                 if any(
-                    _temporal_overlap(left, right, sample_period_ms)
+                    _tracks_cooccur(left, right, observation_by_id, sample_period_ms)
                     for left in left_members
                     for right in right_members
                 ):
                     continue
-                similarity = min(
-                    cosine_similarity(left.embedding, right.embedding)
-                    for left in left_members
-                    for right in right_members
+                similarity = cosine_similarity(
+                    _cluster_embedding(left_members), _cluster_embedding(right_members)
                 )
                 if similarity >= best_similarity:
                     candidate = (left_index, right_index)
@@ -237,7 +323,6 @@ def cluster_tracklets(
         clusters[left_index].extend(clusters.pop(right_index))
 
     clusters.sort(key=lambda members: min(track.start_ms for track in members))
-    observation_by_id = {item["observation_id"]: item for item in observations}
     for index, members in enumerate(clusters, start=1):
         face_id = f"Face-{index:02d}"
         for tracklet in members:

@@ -15,7 +15,7 @@ MERGER_ALGORITHM = "adjacent_semantic_similarity_v1"
 DESCRIPTION_WEIGHT = 0.55
 OBJECT_WEIGHT = 0.30
 PERSON_WEIGHT = 0.15
-NODE_TYPES = {"person", "scene", "object"}
+NODE_TYPES = {"person", "visual_identity", "scene", "object"}
 STRUCTURAL_PREDICATES = {"present_in", "contains", "followed_by", "identity_candidate"}
 
 
@@ -203,7 +203,11 @@ def project_scene_graph(
         face_id = entity["face_id"]
         speaker = entity["speaker_label"]
         participant = participants.get(speaker) if speaker else None
-        node_id = f"person:speaker:{speaker}" if speaker else f"person:face:{face_id}"
+        node_id = (
+            f"person:speaker:{speaker}"
+            if speaker
+            else f"visual_identity:{face_id}"
+        )
         if speaker:
             known_speakers.add(speaker)
         person_by_face[face_id] = node_id
@@ -211,7 +215,7 @@ def project_scene_graph(
             nodes,
             {
                 "id": node_id,
-                "type": "person",
+                "type": "person" if speaker else "visual_identity",
                 "label": (participant or {}).get("display_name") or speaker or face_id,
                 "epistemic_status": "observed",
                 "confidence": binding_confidences.get((speaker, face_id)),
@@ -482,6 +486,9 @@ def project_scene_graph(
             "nodes": len(nodes),
             "edges": len(edges),
             "persons": sum(item["type"] == "person" for item in nodes),
+            "visual_identities": sum(
+                item["type"] == "visual_identity" for item in nodes
+            ),
             "scenes": len(scene_ids),
             "objects": sum(item["type"] == "object" for item in nodes),
             "interactions": interaction_edges,
@@ -545,6 +552,9 @@ def validate_scene_graph(data: dict) -> List[str]:
         "nodes": len(data["nodes"]),
         "edges": len(data["edges"]),
         "persons": sum(item.get("type") == "person" for item in data["nodes"]),
+        "visual_identities": sum(
+            item.get("type") == "visual_identity" for item in data["nodes"]
+        ),
         "scenes": sum(item.get("type") == "scene" for item in data["nodes"]),
         "objects": sum(item.get("type") == "object" for item in data["nodes"]),
         "interactions": sum(

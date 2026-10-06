@@ -80,9 +80,47 @@ def test_camera_cut_does_not_continue_track_on_box_overlap_alone() -> None:
     assert len(manager.tracklets) == 2
 
 
+def test_short_low_quality_fragment_bridges_back_to_surrounding_track() -> None:
+    target = _tracklet("main", 0, 400, [1.0, 0.0])
+    target.observation_ids = [
+        "main-before-1",
+        "main-before-2",
+        "main-before-3",
+        "main-after-1",
+        "main-after-2",
+        "main-after-3",
+    ]
+    fragment = _tracklet("fragment", 100, 300, [0.0, 1.0])
+    fragment.observation_ids = ["fragment-1", "fragment-2", "fragment-3"]
+    observations = [
+        {
+            "observation_id": name,
+            "timestamp_ms": timestamp,
+            "bbox_px": box,
+            "face_id": None,
+        }
+        for name, timestamp, box in [
+            ("main-before-1", 0, [10, 20, 80, 80]),
+            ("main-before-2", 25, [10, 20, 80, 80]),
+            ("main-before-3", 50, [11, 20, 80, 80]),
+            ("fragment-1", 100, [12, 21, 80, 80]),
+            ("fragment-2", 200, [13, 22, 80, 80]),
+            ("fragment-3", 300, [14, 22, 80, 80]),
+            ("main-after-1", 350, [15, 23, 80, 80]),
+            ("main-after-2", 375, [15, 23, 80, 80]),
+            ("main-after-3", 400, [15, 23, 80, 80]),
+        ]
+    ]
+    clusters = cluster_tracklets([target, fragment], observations, 1, 0.45, 100)
+    assert [[item.tracklet_id for item in cluster] for cluster in clusters] == [
+        ["main", "fragment"]
+    ]
+
+
 if __name__ == "__main__":
     test_crossing_faces_keep_identity()
     test_fragmented_tracklets_merge_but_overlapping_people_do_not()
     test_global_clustering_uses_later_cooccurrence_to_separate_lookalikes()
     test_camera_cut_does_not_continue_track_on_box_overlap_alone()
+    test_short_low_quality_fragment_bridges_back_to_surrounding_track()
     print("PASS: identity matching and fragmented-track clustering")

@@ -11,7 +11,15 @@ from .models import file_sha256
 from .scene_graph import STRUCTURAL_PREDICATES, validate_scene_graph
 
 
-NODE_TYPES = {"person", "scene", "object", "topic", "opinion", "intent"}
+NODE_TYPES = {
+    "person",
+    "visual_identity",
+    "scene",
+    "object",
+    "topic",
+    "opinion",
+    "intent",
+}
 DIALOGUE_PREDICATES = {
     "expresses",
     "about",
@@ -495,6 +503,9 @@ def _statistics(data: dict) -> dict:
         "nodes": len(nodes),
         "edges": len(edges),
         "persons": sum(node.get("type") == "person" for node in nodes),
+        "visual_identities": sum(
+            node.get("type") == "visual_identity" for node in nodes
+        ),
         "scenes": sum(node.get("type") == "scene" for node in nodes),
         "objects": sum(node.get("type") == "object" for node in nodes),
         "topics": sum(node.get("type") == "topic" for node in nodes),

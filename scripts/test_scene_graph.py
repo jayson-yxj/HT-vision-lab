@@ -85,7 +85,8 @@ def test_adjacent_semantics_merge_into_evidence_graph() -> None:
         assert graph["statistics"] == {
             "nodes": 4,
             "edges": 4,
-            "persons": 2,
+            "persons": 1,
+            "visual_identities": 1,
             "scenes": 1,
             "objects": 1,
             "interactions": 1,

@@ -31,10 +31,11 @@ def _write_sources(root: Path) -> tuple[Path, Path]:
     second_person = next(
         node
         for node in graph["nodes"]
-        if node["type"] == "person" and not node["attributes"].get("speaker_label")
+        if node["type"] == "visual_identity"
     )
     old_person_id = second_person["id"]
     second_person["id"] = "person:speaker:B"
+    second_person["type"] = "person"
     second_person["label"] = "B"
     second_person["attributes"]["speaker_label"] = "B"
     second_person["attributes"]["participant_id"] = "voice-test:participant:B"
@@ -44,6 +45,8 @@ def _write_sources(root: Path) -> tuple[Path, Path]:
             edge["source"] = second_person["id"]
         if edge["target"] == old_person_id:
             edge["target"] = second_person["id"]
+    graph["statistics"]["persons"] += 1
+    graph["statistics"]["visual_identities"] -= 1
 
     memory_path = root / "session_memory.json"
     memory = {
@@ -131,6 +134,7 @@ def test_voice_graph_reuses_people_and_aligns_turns_to_scenes() -> None:
         assert graph["statistics"]["temporally_linked_turns"] == 2
         assert graph["statistics"]["unlinked_turns"] == 0
         assert len([node for node in graph["nodes"] if node["type"] == "person"]) == 2
+        assert graph["statistics"]["visual_identities"] == 0
         assert not any(node["id"].startswith("person:voice") for node in graph["nodes"])
 
         links = [edge for edge in graph["edges"] if edge["predicate"] == "occurred_in"]

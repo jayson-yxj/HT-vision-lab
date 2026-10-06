@@ -67,7 +67,7 @@
       "required": ["id", "type", "label", "epistemic_status", "confidence", "evidence_refs", "attributes"],
       "properties": {
         "id": {"type": "string", "minLength": 1},
-        "type": {"enum": ["person", "scene", "object"]},
+        "type": {"enum": ["person", "visual_identity", "scene", "object"]},
         "label": {"type": "string", "minLength": 1},
         "epistemic_status": {"enum": ["observed", "inferred"]},
         "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
@@ -95,11 +95,12 @@
     "statistics": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["nodes", "edges", "persons", "scenes", "objects", "interactions", "observed_edges", "inferred_edges"],
+      "required": ["nodes", "edges", "persons", "visual_identities", "scenes", "objects", "interactions", "observed_edges", "inferred_edges"],
       "properties": {
         "nodes": {"type": "integer", "minimum": 0},
         "edges": {"type": "integer", "minimum": 0},
         "persons": {"type": "integer", "minimum": 0},
+        "visual_identities": {"type": "integer", "minimum": 0},
         "scenes": {"type": "integer", "minimum": 0},
         "objects": {"type": "integer", "minimum": 0},
         "interactions": {"type": "integer", "minimum": 0},

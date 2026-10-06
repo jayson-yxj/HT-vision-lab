@@ -405,6 +405,7 @@ def main() -> int:
             print(f"[done] {output}")
             print(
                 f"[graph] persons={stats['persons']}, scenes={stats['scenes']}, "
+                f"visual-identities={stats['visual_identities']}, "
                 f"objects={stats['objects']}, interactions={stats['interactions']}, "
                 f"edges={stats['edges']}"
             )
@@ -438,6 +439,7 @@ def main() -> int:
             print(f"[done] {output}")
             print(
                 f"[conversation] persons={stats['persons']}, topics={stats['topics']}, "
+                f"visual-identities={stats['visual_identities']}, "
                 f"opinions={stats['opinions']}, intents={stats['intents']}, "
                 f"scene-linked-turns={stats['temporally_linked_turns']}/{stats['opinions']}"
             )
