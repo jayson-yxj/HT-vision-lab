@@ -139,6 +139,32 @@ def _visual_tracks(speech_path: Path) -> dict:
                 ],
             },
         ],
+        "speaker_visibility_segments": [
+            {
+                "visibility_id": "speaker-visibility-00001",
+                "speaker_label": "A",
+                "face_id": "Face-01",
+                "start_ms": 0,
+                "end_ms": 1000,
+                "state": "visible",
+                "confidence": 0.98,
+                "reason": "face_track_present",
+                "source_speech_span_ids": ["span-active-a"],
+                "tracklet_ids": ["track-a"],
+            },
+            {
+                "visibility_id": "speaker-visibility-00002",
+                "speaker_label": "B",
+                "face_id": "Face-02",
+                "start_ms": 1000,
+                "end_ms": 2400,
+                "state": "unknown",
+                "confidence": 0.9,
+                "reason": "identity_binding_unresolved",
+                "source_speech_span_ids": ["span-active-b1", "span-active-b2"],
+                "tracklet_ids": [],
+            },
+        ],
     }
 
 
@@ -177,6 +203,7 @@ def test_projection_preserves_personal_information_and_binding_uncertainty() -> 
     ]
     assert result["stats"]["confirmed_visual_associations"] == 1
     assert result["stats"]["disputed_visual_associations"] == 2
+    assert [item["state"] for item in result["visibility_events"]] == ["visible", "unknown"]
 
 
 def test_missing_participant_rejects_binding() -> None:

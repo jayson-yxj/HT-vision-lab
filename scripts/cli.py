@@ -65,6 +65,17 @@ def _parser() -> argparse.ArgumentParser:
     binding.add_argument("--min-speaker-coverage", type=float, default=0.50)
     binding.add_argument("--min-margin", type=float, default=0.40)
 
+    visibility = commands.add_parser(
+        "classify-visibility",
+        help="Classify speaking participants as visible, offscreen, occluded or unknown",
+    )
+    visibility.add_argument("visual_json", type=Path)
+    visibility.add_argument("--output", type=Path)
+    visibility.add_argument("--shot-threshold", type=float, default=0.08)
+    visibility.add_argument("--shot-sample-fps", type=float, default=10.0)
+    visibility.add_argument("--occlusion-max-ms", type=int, default=1200)
+    visibility.add_argument("--boundary-tolerance-ms", type=int, default=240)
+
     participants = commands.add_parser(
         "project-participants",
         help="Project visual identities into an existing participant context",
@@ -187,6 +198,31 @@ def main() -> int:
                     f"({association['status']}, confidence={association['confidence']:.3f}, "
                     f"evidence={association['evidence_duration_ms'] / 1000:.2f}s)"
                 )
+            return 0
+        if args.command == "classify-visibility":
+            from .visibility import classify_visibility
+
+            data = classify_visibility(
+                args.visual_json,
+                output_path=args.output,
+                shot_threshold=args.shot_threshold,
+                shot_sample_fps=args.shot_sample_fps,
+                occlusion_max_ms=args.occlusion_max_ms,
+                boundary_tolerance_ms=args.boundary_tolerance_ms,
+            )
+            errors = validate_output(data)
+            if errors:
+                raise RuntimeError("output validation failed: " + "; ".join(errors))
+            output = args.output.expanduser().resolve() if args.output else args.visual_json.expanduser().resolve()
+            print(f"[done] {output}")
+            counts = data["statistics"]["speaker_visibility_state_counts"]
+            print(
+                "[visibility] "
+                + ", ".join(
+                    f"{state}={counts[state]}"
+                    for state in ("visible", "offscreen", "occluded", "unknown")
+                )
+            )
             return 0
         if args.command == "project-participants":
             from .multimodal_context import project_multimodal_context

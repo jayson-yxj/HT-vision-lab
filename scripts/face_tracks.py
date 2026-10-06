@@ -593,6 +593,7 @@ def analyze_video(
         "active_speaker_scores": [],
         "active_speaker_segments": [],
         "speaker_face_associations": [],
+        "speaker_visibility_segments": [],
         "statistics": {
             "sampled_frames": sampled_frames,
             "detections": len(manager.observations),
@@ -634,6 +635,7 @@ def validate_output(data: dict) -> List[str]:
         "active_speaker_scores",
         "active_speaker_segments",
         "speaker_face_associations",
+        "speaker_visibility_segments",
         "statistics",
         "warnings",
     }
@@ -736,4 +738,28 @@ def validate_output(data: dict) -> List[str]:
             evidence_duration += evidence["duration_ms"]
         if evidence_duration != association["evidence_duration_ms"]:
             errors.append(f"{label} evidence duration does not match its summary")
+    visibility_segments = data["speaker_visibility_segments"]
+    visibility_ids = [item["visibility_id"] for item in visibility_segments]
+    if len(visibility_ids) != len(set(visibility_ids)):
+        errors.append("duplicate speaker visibility IDs")
+    previous_by_speaker: Dict[str, int] = {}
+    for segment in sorted(
+        visibility_segments, key=lambda item: (item["speaker_label"], item["start_ms"])
+    ):
+        label = segment["visibility_id"]
+        face_id = segment["face_id"]
+        if face_id is not None and face_id not in face_set:
+            errors.append(f"{label} references unknown face")
+        if segment["state"] == "visible" and face_id is None:
+            errors.append(f"{label} is visible without a face")
+        if segment["start_ms"] >= segment["end_ms"]:
+            errors.append(f"{label} has invalid time range")
+        if segment["end_ms"] > data["source"]["duration_ms"]:
+            errors.append(f"{label} exceeds source duration")
+        if not set(segment["tracklet_ids"]).issubset(tracklet_set):
+            errors.append(f"{label} references unknown tracklets")
+        previous_end = previous_by_speaker.get(segment["speaker_label"], -1)
+        if segment["start_ms"] < previous_end:
+            errors.append(f"{label} overlaps another visibility state for the same speaker")
+        previous_by_speaker[segment["speaker_label"]] = segment["end_ms"]
     return errors

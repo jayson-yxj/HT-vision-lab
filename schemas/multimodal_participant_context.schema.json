@@ -13,6 +13,7 @@
     "policy",
     "participants",
     "visual_entities",
+    "visibility_events",
     "observations",
     "evidence",
     "associations",
@@ -28,6 +29,7 @@
     "policy": {"$ref": "#/$defs/policy"},
     "participants": {"type": "array", "items": {"$ref": "#/$defs/participant"}},
     "visual_entities": {"type": "array", "items": {"$ref": "#/$defs/visualEntity"}},
+    "visibility_events": {"type": "array", "items": {"$ref": "#/$defs/visibilityEvent"}},
     "observations": {"type": "array", "items": {"$ref": "#/$defs/observation"}},
     "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}},
     "associations": {"type": "array", "items": {"$ref": "#/$defs/association"}},
@@ -117,6 +119,24 @@
         "visible_duration_s": {"type": "number", "minimum": 0},
         "observation_count": {"type": "integer", "minimum": 1},
         "evidence_image": {"type": "string"}
+      }
+    },
+    "visibilityEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["visibility_event_id", "participant_id", "speaker_label", "visual_entity_ref", "state", "confidence", "reason", "start_s", "end_s", "evidence_id", "source_visibility_id"],
+      "properties": {
+        "visibility_event_id": {"type": "string", "minLength": 1},
+        "participant_id": {"type": "string", "minLength": 1},
+        "speaker_label": {"enum": ["A", "B", "C", "D"]},
+        "visual_entity_ref": {"type": ["string", "null"]},
+        "state": {"enum": ["visible", "offscreen", "occluded", "unknown"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "reason": {"enum": ["face_track_present", "timestamp_boundary_tolerance", "short_gap_within_same_shot", "bound_face_absent", "no_bound_visible_face", "identity_binding_unresolved"]},
+        "start_s": {"type": "number", "minimum": 0},
+        "end_s": {"type": "number", "exclusiveMinimum": 0},
+        "evidence_id": {"type": "string", "minLength": 1},
+        "source_visibility_id": {"type": "string", "minLength": 1}
       }
     },
     "observation": {
@@ -231,7 +251,8 @@
         "multimodal_evidence",
         "visual_associations",
         "confirmed_visual_associations",
-        "disputed_visual_associations"
+        "disputed_visual_associations",
+        "visibility_events"
       ],
       "properties": {
         "participants": {"type": "integer", "minimum": 0},
@@ -244,7 +265,8 @@
         "multimodal_evidence": {"type": "integer", "minimum": 0},
         "visual_associations": {"type": "integer", "minimum": 0},
         "confirmed_visual_associations": {"type": "integer", "minimum": 0},
-        "disputed_visual_associations": {"type": "integer", "minimum": 0}
+        "disputed_visual_associations": {"type": "integer", "minimum": 0},
+        "visibility_events": {"type": "integer", "minimum": 0}
       },
       "additionalProperties": false
     }

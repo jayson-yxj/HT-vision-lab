@@ -192,6 +192,39 @@ def _evidence_record(
     }
 
 
+def _visibility_evidence_record(session_id: str, participant_id: str, segment: dict) -> dict:
+    payload = {
+        "type": "speaker_visibility_state",
+        "speaker_label": segment["speaker_label"],
+        "face_id": segment["face_id"],
+        "state": segment["state"],
+        "reason": segment["reason"],
+        "start_ms": segment["start_ms"],
+        "end_ms": segment["end_ms"],
+    }
+    content = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    identity = "\x1f".join((participant_id, "visibility", segment["visibility_id"]))
+    return {
+        "evidence_id": f"{session_id}:evidence:multimodal:{_sha256_text(identity)[:16]}",
+        "participant_id": participant_id,
+        "modality": "multimodal",
+        "source_type": "video_track",
+        "source_id": segment["visibility_id"],
+        "speaker_label": segment["speaker_label"],
+        "start_s": segment["start_ms"] / 1000,
+        "end_s": segment["end_ms"] / 1000,
+        "content": content,
+        "content_sha256": _sha256_text(content),
+        "contribution_ids": list(
+            dict.fromkeys(
+                segment["source_speech_span_ids"]
+                + segment["tracklet_ids"]
+                + [segment["visibility_id"]]
+            )
+        ),
+    }
+
+
 def project_multimodal_context(
     visual_path: Path,
     participant_context_path: Path,
@@ -319,6 +352,38 @@ def project_multimodal_context(
             existing_association_ids.add(association_id)
 
     context["associations"] = associations
+    context["visibility_events"] = []
+    for segment in visual.get("speaker_visibility_segments", []):
+        participant = participants.get(segment["speaker_label"])
+        if participant is None:
+            raise ValueError(
+                f"visibility segment speaker {segment['speaker_label']} has no participant"
+            )
+        visual_ref = visual_refs.get(segment["face_id"]) if segment["face_id"] else None
+        evidence = _visibility_evidence_record(
+            context["session_id"], participant["participant_id"], segment
+        )
+        if evidence["evidence_id"] in evidence_by_id:
+            raise ValueError(f"evidence ID collision: {evidence['evidence_id']}")
+        context["evidence"].append(evidence)
+        evidence_by_id[evidence["evidence_id"]] = evidence
+        added_evidence_ids.add(evidence["evidence_id"])
+        participant["evidence_ids"].append(evidence["evidence_id"])
+        context["visibility_events"].append(
+            {
+                "visibility_event_id": f"{context['session_id']}:visibility:{segment['visibility_id']}",
+                "participant_id": participant["participant_id"],
+                "speaker_label": segment["speaker_label"],
+                "visual_entity_ref": visual_ref,
+                "state": segment["state"],
+                "confidence": segment["confidence"],
+                "reason": segment["reason"],
+                "start_s": segment["start_ms"] / 1000,
+                "end_s": segment["end_ms"] / 1000,
+                "evidence_id": evidence["evidence_id"],
+                "source_visibility_id": segment["visibility_id"],
+            }
+        )
     context["stats"] = copy.deepcopy(upstream["stats"])
     context["stats"].update(
         {
@@ -335,6 +400,7 @@ def project_multimodal_context(
             "disputed_visual_associations": sum(
                 item["state"] == "disputed" for item in added_associations
             ),
+            "visibility_events": len(context["visibility_events"]),
         }
     )
     errors = validate_multimodal_context(context)
@@ -361,6 +427,7 @@ def validate_multimodal_context(context: dict) -> List[str]:
         "policy",
         "participants",
         "visual_entities",
+        "visibility_events",
         "observations",
         "evidence",
         "associations",
@@ -383,6 +450,7 @@ def validate_multimodal_context(context: dict) -> List[str]:
     evidence_ids = [item["evidence_id"] for item in context["evidence"]]
     observation_ids = [item["observation_id"] for item in context["observations"]]
     association_ids = [item["association_id"] for item in context["associations"]]
+    visibility_event_ids = [item["visibility_event_id"] for item in context["visibility_events"]]
     for label, values in (
         ("participant", participant_ids),
         ("speaker", speaker_labels),
@@ -390,6 +458,7 @@ def validate_multimodal_context(context: dict) -> List[str]:
         ("evidence", evidence_ids),
         ("observation", observation_ids),
         ("association", association_ids),
+        ("visibility event", visibility_event_ids),
     ):
         if len(values) != len(set(values)):
             errors.append(f"duplicate {label} IDs")
@@ -434,4 +503,13 @@ def validate_multimodal_context(context: dict) -> List[str]:
         errors.append("a participant has more than one confirmed visual identity")
     if len(confirmed_right) != len(set(confirmed_right)):
         errors.append("a visual identity is confirmed for more than one participant")
+    for event in context["visibility_events"]:
+        if event["participant_id"] not in participant_set:
+            errors.append(f"{event['visibility_event_id']} references unknown participant")
+        if event["visual_entity_ref"] is not None and event["visual_entity_ref"] not in visual_set:
+            errors.append(f"{event['visibility_event_id']} references unknown visual entity")
+        if event["evidence_id"] not in evidence_set:
+            errors.append(f"{event['visibility_event_id']} references unknown evidence")
+        if event["start_s"] >= event["end_s"]:
+            errors.append(f"{event['visibility_event_id']} has invalid time range")
     return errors

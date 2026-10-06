@@ -15,6 +15,7 @@
     "active_speaker_scores",
     "active_speaker_segments",
     "speaker_face_associations",
+    "speaker_visibility_segments",
     "statistics",
     "warnings"
   ],
@@ -29,6 +30,7 @@
     "active_speaker_scores": {"type": "array", "items": {"$ref": "#/$defs/activeSpeakerScore"}},
     "active_speaker_segments": {"type": "array", "items": {"$ref": "#/$defs/activeSpeakerSegment"}},
     "speaker_face_associations": {"type": "array", "items": {"$ref": "#/$defs/speakerFaceAssociation"}},
+    "speaker_visibility_segments": {"type": "array", "items": {"$ref": "#/$defs/speakerVisibilitySegment"}},
     "statistics": {"$ref": "#/$defs/statistics"},
     "warnings": {"type": "array", "items": {"type": "string"}}
   },
@@ -61,6 +63,7 @@
         "active_speaker": {"$ref": "#/$defs/model"},
         "active_speaker_parameters": {"type": "object"},
         "speaker_face_binding": {"$ref": "#/$defs/speakerFaceBinding"},
+        "visibility_classification": {"$ref": "#/$defs/visibilityClassification"},
         "parameters": {"type": "object"},
         "elapsed_seconds": {"type": "number", "minimum": 0}
       }
@@ -235,6 +238,36 @@
         "min_margin": {"type": "number", "minimum": 0, "maximum": 1}
       }
     },
+    "speakerVisibilitySegment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["visibility_id", "speaker_label", "face_id", "start_ms", "end_ms", "state", "confidence", "reason", "source_speech_span_ids", "tracklet_ids"],
+      "properties": {
+        "visibility_id": {"type": "string", "minLength": 1},
+        "speaker_label": {"enum": ["A", "B", "C", "D"]},
+        "face_id": {"type": ["string", "null"]},
+        "start_ms": {"type": "integer", "minimum": 0},
+        "end_ms": {"type": "integer", "minimum": 1},
+        "state": {"enum": ["visible", "offscreen", "occluded", "unknown"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "reason": {"enum": ["face_track_present", "timestamp_boundary_tolerance", "short_gap_within_same_shot", "bound_face_absent", "no_bound_visible_face", "identity_binding_unresolved"]},
+        "source_speech_span_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+        "tracklet_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+      }
+    },
+    "visibilityClassification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "shot_threshold", "shot_sample_fps", "shot_boundaries_ms", "occlusion_max_ms", "boundary_tolerance_ms"],
+      "properties": {
+        "algorithm": {"const": "speech_conditioned_face_visibility_v1"},
+        "shot_threshold": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "shot_sample_fps": {"type": "number", "exclusiveMinimum": 0},
+        "shot_boundaries_ms": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        "occlusion_max_ms": {"type": "integer", "minimum": 0},
+        "boundary_tolerance_ms": {"type": "integer", "minimum": 0}
+      }
+    },
     "statistics": {
       "type": "object",
       "additionalProperties": false,
@@ -249,7 +282,19 @@
         "active_speaker_score_count": {"type": "integer", "minimum": 0},
         "active_speaker_segment_count": {"type": "integer", "minimum": 0},
         "speaker_face_association_count": {"type": "integer", "minimum": 0},
-        "confirmed_speaker_face_association_count": {"type": "integer", "minimum": 0}
+        "confirmed_speaker_face_association_count": {"type": "integer", "minimum": 0},
+        "speaker_visibility_segment_count": {"type": "integer", "minimum": 0},
+        "speaker_visibility_state_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["visible", "offscreen", "occluded", "unknown"],
+          "properties": {
+            "visible": {"type": "integer", "minimum": 0},
+            "offscreen": {"type": "integer", "minimum": 0},
+            "occluded": {"type": "integer", "minimum": 0},
+            "unknown": {"type": "integer", "minimum": 0}
+          }
+        }
       }
     }
   }

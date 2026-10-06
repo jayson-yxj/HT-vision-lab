@@ -14,6 +14,7 @@
 6. 默认按首版“通常不会同时说话”的约束，每 40 毫秒只保留得分最高的人脸；
 7. 将 Sortformer 稳定后的 A/B/C/D 时间线与 Face-ID 做一对一重叠匹配，并保留全部候选证据。
 8. 将视觉身份投影到语音侧匿名参与者协议，保留已有个人信息并追加可追溯的多模态证据。
+9. 在发言时间线上区分 `visible / offscreen / occluded / unknown`，并用切镜检测避免把换镜误判成遮挡。
 
 所有模型在本地运行。模型 URL 固定到上游仓库的具体 Git revision，下载后校验文件大小和 SHA-256。YuNet 和 LR-ASD 为 MIT，SFace 为 Apache-2.0；详见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
@@ -85,6 +86,14 @@ bash setup-asd.sh
 
 输入必须是声纹稳定后的 `A/B/C/D`，不接受原始 `speaker0…speaker3` 槽位。命令按时间重叠求全局一对一最优解，并输出 `confirmed`、`candidate`、`ambiguous` 或 `offscreen`。如果音频和视频片段起点不同，可用 `--timeline-offset-ms` 将语音时间整体平移后再匹配。
 
+在人物发言期间分类可见性：
+
+```bash
+./lab classify-visibility results/example/visual_tracks.json
+```
+
+对应人脸轨迹存在时为 `visible`；同一镜头内前后重新出现的短缺口为低置信度 `occluded`；确认身份发言但人脸不在画面时为 `offscreen`；身份绑定仍有冲突时保持 `unknown`。遮挡判定是一项基于轨迹和切镜的推断，不作为确定的人体遮挡检测结果。
+
 将绑定结果投影到语音侧已有的匿名参与者和个人信息：
 
 ```bash
@@ -116,6 +125,7 @@ results/example/
 - `active_speaker_scores`：每张可见脸每 40 毫秒的原始分数、概率和最终判定；
 - `active_speaker_segments`：连续的可见说话人区间；
 - `speaker_face_associations`：A/B/C/D 与 Face-ID 的状态、覆盖率、纯度、第二候选差距和原始重叠证据。
+- `speaker_visibility_segments`：参与者在发言期间的可见、画外、疑似遮挡或未知状态。
 
 融合人物协议位于 [`schemas/multimodal_participant_context.schema.json`](schemas/multimodal_participant_context.schema.json)，它复用语音侧的参与者、个人信息观察和证据对象，并增加 `visual_entities` 与人物—视觉身份关联。
 
@@ -126,13 +136,13 @@ results/example/
 - 中文 480p、30 秒片段：镜头切换后保持 4 个可见身份，LR-ASD 检出的 3 位实际发言者与已知 0–8、9–21、22 秒之后的顺序一致；
 - 英文 720p、60 秒片段：从 6 个可见身份中筛出 4 个实际发言身份，同一时刻的静默人脸弱阳性已被排除；
 - 中文绑定得到 `A→Face-01`、`B→Face-02`、`C→Face-03`，三项均为 `confirmed`；英文 `A/B` 确认绑定，`C` 因同时积累到两个 Face-ID 的显著证据而标为 `ambiguous`；
-- 英文四人上下文投影得到 6 个视觉实体、2 条确认关联、2 条争议关联和 8 条多模态证据；未在 60 秒片段中发言的 D 保持匿名且不产生视觉绑定；
+- 英文四人上下文投影得到 6 个视觉实体、2 条确认关联、2 条争议关联、5 个可见性事件和 13 条多模态证据；未在 60 秒片段中发言的 D 保持匿名且不产生视觉绑定；
+- 中文三位发言者均为 `visible`；英文 A/B 为 `visible`，C 因身份冲突保持 `unknown`，系统没有把冲突错误改写为画外或遮挡；
 - 两条样例都通过结构引用、时间范围和单一说话者约束检查，主动说话视频保留原始音频。
 
 ## 后续顺序
 
-1. 加入画外说话、遮挡和无法判断状态；
-2. 加入关键帧场景、人物姿态和二维空间关系；
-3. 建立跨会话人物档案、摄像头实时处理和人工纠错。
+1. 加入关键帧场景、人物姿态和二维空间关系；
+2. 建立跨会话人物档案、摄像头实时处理和人工纠错。
 
 语音基线固定为 `HT-voice-lab` 标签 `voice-baseline-2026-09-28`。
