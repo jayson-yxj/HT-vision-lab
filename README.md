@@ -104,6 +104,18 @@ bash setup-asd.sh
 
 如果产生了纠正，语音侧已有的 participant context、观点、意图和会话记忆仍包含旧说话人标签；后续集成应以 `reconciled_speech_spans.json` 重新生成这些语义结果，视觉模块不会静默改写原记忆。
 
+用纠正时间线重新生成话轮、观点、意图、会话记忆和个人信息，并接回已确认的人脸：
+
+```bash
+./lab rebuild-voice-context \
+  results/example/visual_tracks.json \
+  results/example/reconciled_speech_spans.json \
+  --output results/example/reconciled-voice \
+  --groq-proxy http://127.0.0.1:7890
+```
+
+该命令把纠正后的 `speech_spans` 提取到新目录，通过冻结的 `HT-voice-lab` 命令行重新执行语义话轮、记忆压缩和个人信息提取，最后生成 `multimodal_participant_context.json`。它不会导入或修改语音项目代码，也不会覆盖原来的语音结果；`voice_context_build.json` 保存全部输入输出哈希。若不需要调用个人信息提取模型，可加 `--no-personal-info`。
+
 在人物发言期间分类可见性：
 
 ```bash

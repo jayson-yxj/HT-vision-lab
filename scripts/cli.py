@@ -79,6 +79,27 @@ def _parser() -> argparse.ArgumentParser:
     reconciliation.add_argument("--min-span-coverage", type=float, default=0.60)
     reconciliation.add_argument("--min-face-dominance", type=float, default=0.60)
 
+    voice_context = commands.add_parser(
+        "rebuild-voice-context",
+        help="Regenerate voice semantics and participant memory from a corrected timeline",
+    )
+    voice_context.add_argument("visual_json", type=Path)
+    voice_context.add_argument("reconciled_timeline_json", type=Path)
+    voice_context.add_argument("--output", type=Path, required=True)
+    voice_context.add_argument(
+        "--voice-lab-root",
+        type=Path,
+        default=Path(__file__).resolve().parents[2] / "HT-voice-lab",
+    )
+    voice_context.add_argument("--model", default="qwen/qwen3.8-27b")
+    voice_context.add_argument("--semantic-timeout", type=float, default=20.0)
+    voice_context.add_argument("--memory-timeout", type=float, default=45.0)
+    voice_context.add_argument("--personal-timeout", type=float, default=45.0)
+    voice_context.add_argument("--minimum-interval", type=float, default=0.2)
+    voice_context.add_argument("--groq-proxy")
+    voice_context.add_argument("--assistant-alias", action="append")
+    voice_context.add_argument("--no-personal-info", action="store_true")
+
     visibility = commands.add_parser(
         "classify-visibility",
         help="Classify speaking participants as visible, offscreen, occluded or unknown",
@@ -340,6 +361,33 @@ def main() -> int:
                 )
             for warning in data["warnings"]:
                 print(f"[warning] {warning}")
+            return 0
+        if args.command == "rebuild-voice-context":
+            from .voice_context import rebuild_voice_context
+
+            data = rebuild_voice_context(
+                args.visual_json,
+                args.reconciled_timeline_json,
+                args.output,
+                args.voice_lab_root,
+                model=args.model,
+                semantic_timeout=args.semantic_timeout,
+                memory_timeout=args.memory_timeout,
+                personal_timeout=args.personal_timeout,
+                minimum_interval=args.minimum_interval,
+                proxy=args.groq_proxy,
+                assistant_aliases=args.assistant_alias or ("小派",),
+                extract_personal_info=not args.no_personal_info,
+            )
+            stats = data["statistics"]
+            print(f"[done] {args.output.expanduser().resolve() / 'voice_context_build.json'}")
+            print(
+                f"[voice-context] spans={stats['speech_spans']}, "
+                f"corrected={stats['corrected_spans']}, "
+                f"turns={stats['completed_turns']}, participants={stats['participants']}, "
+                f"personal-observations={stats['personal_observations']}, "
+                f"confirmed-face-links={stats['confirmed_visual_associations']}"
+            )
             return 0
         if args.command == "classify-visibility":
             from .visibility import classify_visibility
