@@ -1,0 +1,252 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hightorque.local/schemas/multimodal-participant-context-v1.json",
+  "title": "HT multimodal participant context",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "context_type",
+    "session_id",
+    "created_at",
+    "source",
+    "policy",
+    "participants",
+    "visual_entities",
+    "observations",
+    "evidence",
+    "associations",
+    "extraction",
+    "stats"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "context_type": {"const": "multimodal_participant_context"},
+    "session_id": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "source": {"$ref": "#/$defs/source"},
+    "policy": {"$ref": "#/$defs/policy"},
+    "participants": {"type": "array", "items": {"$ref": "#/$defs/participant"}},
+    "visual_entities": {"type": "array", "items": {"$ref": "#/$defs/visualEntity"}},
+    "observations": {"type": "array", "items": {"$ref": "#/$defs/observation"}},
+    "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}},
+    "associations": {"type": "array", "items": {"$ref": "#/$defs/association"}},
+    "extraction": {"$ref": "#/$defs/extraction"},
+    "stats": {"$ref": "#/$defs/stats"}
+  },
+  "$defs": {
+    "sourceFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["participant_context", "visual_tracks", "upstream"],
+      "properties": {
+        "participant_context": {"$ref": "#/$defs/sourceFile"},
+        "visual_tracks": {"$ref": "#/$defs/sourceFile"},
+        "upstream": {"type": "object"}
+      }
+    },
+    "policy": {
+      "type": "object",
+      "required": [
+        "identity_scope",
+        "unknown_fields_remain_empty",
+        "visual_identity_scope",
+        "confirmed_bindings_are_identity_links",
+        "ambiguous_bindings_remain_disputed"
+      ],
+      "properties": {
+        "identity_scope": {"const": "current_session"},
+        "auto_create_participants": {"type": "boolean"},
+        "manual_binding_required": {"type": "boolean"},
+        "unknown_fields_remain_empty": {"const": true},
+        "completed_turns_only": {"type": "boolean"},
+        "visual_identity_scope": {"const": "current_session"},
+        "confirmed_bindings_are_identity_links": {"const": true},
+        "ambiguous_bindings_remain_disputed": {"const": true}
+      },
+      "additionalProperties": false
+    },
+    "participant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "participant_id",
+        "speaker_label",
+        "person_id",
+        "display_name",
+        "identity_status",
+        "observation_ids",
+        "evidence_ids"
+      ],
+      "properties": {
+        "participant_id": {"type": "string", "minLength": 1},
+        "speaker_label": {"type": "string", "minLength": 1},
+        "person_id": {"type": ["string", "null"]},
+        "display_name": {"type": ["string", "null"]},
+        "identity_status": {"enum": ["anonymous", "session_identified", "persistent_linked"]},
+        "observation_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "evidence_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+      }
+    },
+    "visualEntity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "visual_entity_ref",
+        "source_face_id",
+        "first_seen_s",
+        "last_seen_s",
+        "visible_duration_s",
+        "observation_count",
+        "evidence_image"
+      ],
+      "properties": {
+        "visual_entity_ref": {"type": "string", "minLength": 1},
+        "source_face_id": {"type": "string", "minLength": 1},
+        "first_seen_s": {"type": "number", "minimum": 0},
+        "last_seen_s": {"type": "number", "minimum": 0},
+        "visible_duration_s": {"type": "number", "minimum": 0},
+        "observation_count": {"type": "integer", "minimum": 1},
+        "evidence_image": {"type": "string"}
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observation_id",
+        "participant_id",
+        "modality",
+        "kind",
+        "value",
+        "epistemic_status",
+        "state",
+        "confidence",
+        "durability",
+        "evidence_ids",
+        "evidence_quotes",
+        "context_evidence_ids",
+        "context_quotes"
+      ],
+      "properties": {
+        "observation_id": {"type": "string", "minLength": 1},
+        "participant_id": {"type": "string", "minLength": 1},
+        "modality": {"enum": ["speech_text", "vision", "multimodal"]},
+        "kind": {"enum": ["name", "role", "occupation", "location", "experience", "preference", "goal", "relationship", "communication_style", "trait"]},
+        "value": {"type": "string", "minLength": 1},
+        "epistemic_status": {"enum": ["explicit", "inferred"]},
+        "state": {"enum": ["candidate", "confirmed", "disputed", "superseded"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "durability": {"enum": ["stable", "temporary", "unknown"]},
+        "evidence_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+        "evidence_quotes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/evidenceQuote"}},
+        "context_evidence_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "context_quotes": {"type": "array", "items": {"$ref": "#/$defs/evidenceQuote"}}
+      }
+    },
+    "evidenceQuote": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_id", "quote"],
+      "properties": {
+        "evidence_id": {"type": "string", "minLength": 1},
+        "quote": {"type": "string", "minLength": 1}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id",
+        "participant_id",
+        "modality",
+        "source_type",
+        "source_id",
+        "speaker_label",
+        "start_s",
+        "end_s",
+        "content",
+        "content_sha256",
+        "contribution_ids"
+      ],
+      "properties": {
+        "evidence_id": {"type": "string", "minLength": 1},
+        "participant_id": {"type": "string", "minLength": 1},
+        "modality": {"enum": ["speech_text", "vision", "multimodal"]},
+        "source_type": {"enum": ["completed_turn", "audio_span", "video_frame", "video_track"]},
+        "source_id": {"type": "string", "minLength": 1},
+        "speaker_label": {"type": ["string", "null"]},
+        "start_s": {"type": ["number", "null"], "minimum": 0},
+        "end_s": {"type": ["number", "null"], "minimum": 0},
+        "content": {"type": "string"},
+        "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "contribution_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+      }
+    },
+    "association": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["association_id", "left_ref", "right_ref", "relation", "confidence", "state", "evidence_ids"],
+      "properties": {
+        "association_id": {"type": "string", "minLength": 1},
+        "left_ref": {"type": "string", "minLength": 1},
+        "right_ref": {"type": "string", "minLength": 1},
+        "relation": {"type": "string", "minLength": 1},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "state": {"enum": ["candidate", "confirmed", "disputed", "superseded"]},
+        "evidence_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "source_binding_status": {"enum": ["candidate", "confirmed", "ambiguous", "offscreen"]},
+        "speaker_coverage": {"type": "number", "minimum": 0, "maximum": 1},
+        "evidence_duration_ms": {"type": "integer", "minimum": 0}
+      }
+    },
+    "extraction": {
+      "type": "object",
+      "required": ["provider", "model", "rejected_claims"],
+      "properties": {
+        "provider": {"type": "string", "minLength": 1},
+        "model": {"type": ["string", "null"]},
+        "rejected_claims": {"type": "array"}
+      },
+      "additionalProperties": false
+    },
+    "stats": {
+      "type": "object",
+      "required": [
+        "participants",
+        "completed_turns",
+        "observations",
+        "evidence",
+        "associations",
+        "visual_entities",
+        "multimodal_evidence",
+        "visual_associations",
+        "confirmed_visual_associations",
+        "disputed_visual_associations"
+      ],
+      "properties": {
+        "participants": {"type": "integer", "minimum": 0},
+        "completed_turns": {"type": "integer", "minimum": 0},
+        "observations": {"type": "integer", "minimum": 0},
+        "evidence": {"type": "integer", "minimum": 0},
+        "associations": {"type": "integer", "minimum": 0},
+        "rejected_claims": {"type": "integer", "minimum": 0},
+        "visual_entities": {"type": "integer", "minimum": 0},
+        "multimodal_evidence": {"type": "integer", "minimum": 0},
+        "visual_associations": {"type": "integer", "minimum": 0},
+        "confirmed_visual_associations": {"type": "integer", "minimum": 0},
+        "disputed_visual_associations": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    }
+  }
+}

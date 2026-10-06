@@ -47,6 +47,7 @@ def test_one_to_one_binding_and_offscreen_status() -> None:
     associations = {item["speaker_label"]: item for item in result["speaker_face_associations"]}
     assert associations["A"]["face_id"] == "Face-01"
     assert associations["A"]["status"] == "confirmed"
+    assert associations["A"]["candidate_faces"][0]["evidence"][0]["duration_ms"] == 900
     assert associations["B"]["face_id"] == "Face-02"
     assert associations["B"]["status"] == "confirmed"
     assert associations["C"]["face_id"] is None

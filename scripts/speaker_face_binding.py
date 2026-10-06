@@ -206,6 +206,7 @@ def bind_speakers_to_faces(
                     "face_id": face_id,
                     "evidence_duration_ms": overlap,
                     "speaker_coverage": round(overlap / speech_duration, 6),
+                    "evidence": evidence_by_pair[(speaker, face_id)],
                 }
             )
         candidates.sort(key=lambda item: (-item["evidence_duration_ms"], item["face_id"]))

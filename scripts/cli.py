@@ -64,6 +64,19 @@ def _parser() -> argparse.ArgumentParser:
     binding.add_argument("--min-evidence-ms", type=int, default=1000)
     binding.add_argument("--min-speaker-coverage", type=float, default=0.50)
     binding.add_argument("--min-margin", type=float, default=0.40)
+
+    participants = commands.add_parser(
+        "project-participants",
+        help="Project visual identities into an existing participant context",
+    )
+    participants.add_argument("visual_json", type=Path)
+    participants.add_argument("participant_context_json", type=Path)
+    participants.add_argument("--output", type=Path)
+
+    validate_participants = commands.add_parser(
+        "validate-participants", help="Validate a multimodal participant context"
+    )
+    validate_participants.add_argument("json_path", type=Path)
     return parser
 
 
@@ -174,6 +187,39 @@ def main() -> int:
                     f"({association['status']}, confidence={association['confidence']:.3f}, "
                     f"evidence={association['evidence_duration_ms'] / 1000:.2f}s)"
                 )
+            return 0
+        if args.command == "project-participants":
+            from .multimodal_context import project_multimodal_context
+
+            data = project_multimodal_context(
+                args.visual_json,
+                args.participant_context_json,
+                output_path=args.output,
+            )
+            output = (
+                args.output.expanduser().resolve()
+                if args.output
+                else args.visual_json.expanduser().resolve().parent
+                / "multimodal_participant_context.json"
+            )
+            print(f"[done] {output}")
+            print(
+                f"[participants] {data['stats']['participants']} participants, "
+                f"{data['stats']['visual_associations']} visual associations "
+                f"({data['stats']['confirmed_visual_associations']} confirmed, "
+                f"{data['stats']['disputed_visual_associations']} disputed)"
+            )
+            return 0
+        if args.command == "validate-participants":
+            from .multimodal_context import validate_multimodal_context
+
+            with args.json_path.open(encoding="utf-8") as handle:
+                errors = validate_multimodal_context(json.load(handle))
+            if errors:
+                for error in errors:
+                    print(f"ERROR: {error}", file=sys.stderr)
+                return 1
+            print(f"PASS: {args.json_path}")
             return 0
     except (FileNotFoundError, RuntimeError, ValueError) as error:
         print(f"ERROR: {error}", file=sys.stderr)

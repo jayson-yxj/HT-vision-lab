@@ -718,6 +718,15 @@ def validate_output(data: dict) -> List[str]:
         for candidate in association.get("candidate_faces", []):
             if candidate["face_id"] not in face_set:
                 errors.append(f"{label} candidate references unknown face")
+            candidate_duration = 0
+            for evidence in candidate.get("evidence", []):
+                if evidence["active_speaker_segment_id"] not in active_segment_ids:
+                    errors.append(f"{label} candidate evidence references unknown active-speaker segment")
+                if evidence["end_ms"] - evidence["start_ms"] != evidence["duration_ms"]:
+                    errors.append(f"{label} candidate evidence has inconsistent duration")
+                candidate_duration += evidence["duration_ms"]
+            if candidate_duration != candidate["evidence_duration_ms"]:
+                errors.append(f"{label} candidate evidence duration does not match its summary")
         evidence_duration = 0
         for evidence in association.get("evidence", []):
             if evidence["active_speaker_segment_id"] not in active_segment_ids:
