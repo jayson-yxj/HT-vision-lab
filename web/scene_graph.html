@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HT 多模态场景图</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #071018;
+      --panel: #0d1924;
+      --panel-2: #122230;
+      --line: #253b4b;
+      --text: #edf7fb;
+      --muted: #8fa6b5;
+      --person: #53d1c8;
+      --scene: #a986ff;
+      --object: #ffbf69;
+      --observed: #63d6ff;
+      --inferred: #d39cff;
+      --warning: #ffdd7a;
+      --danger: #ff7c8f;
+    }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 12% -8%, rgba(36, 106, 122, .34), transparent 32rem),
+        radial-gradient(circle at 88% 0, rgba(100, 60, 156, .24), transparent 28rem),
+        var(--bg);
+      color: var(--text);
+      font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    header { padding: 24px 28px 18px; border-bottom: 1px solid var(--line); }
+    .eyebrow { color: var(--person); font-size: 11px; font-weight: 800; letter-spacing: .17em; text-transform: uppercase; }
+    h1 { margin: 5px 0 0; font-size: clamp(26px, 4vw, 42px); line-height: 1.05; letter-spacing: -.045em; }
+    .headline-row { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
+    .status { display: flex; align-items: center; gap: 8px; color: var(--muted); white-space: nowrap; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--person); box-shadow: 0 0 14px var(--person); }
+    .status-dot.error { background: var(--danger); box-shadow: 0 0 14px var(--danger); }
+    .stats { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+    .chip { padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; background: rgba(17, 34, 48, .72); color: var(--muted); }
+    .chip strong { color: var(--text); }
+    .timeline-wrap { padding: 18px 28px; border-bottom: 1px solid var(--line); background: rgba(5, 13, 20, .55); }
+    .section-label { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+    .timeline { display: flex; min-height: 74px; gap: 5px; margin-top: 9px; overflow-x: auto; }
+    .timeline button {
+      min-width: 126px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+      background: linear-gradient(145deg, rgba(169,134,255,.16), rgba(18,34,48,.82));
+      text-align: left; cursor: pointer; transition: border-color .15s, transform .15s, background .15s;
+    }
+    .timeline button:hover { transform: translateY(-2px); border-color: var(--scene); }
+    .timeline button.active { border-color: var(--scene); background: rgba(169,134,255,.25); box-shadow: inset 0 -3px 0 var(--scene); }
+    .timeline .time { display: block; color: var(--scene); font-size: 11px; font-weight: 800; }
+    .timeline .name { display: block; margin-top: 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .timeline .category { color: var(--muted); font-size: 11px; }
+    .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 340px; min-height: calc(100vh - 230px); }
+    .canvas { min-width: 0; padding: 18px; overflow: auto; }
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .toggle, .clear-button {
+      border: 1px solid var(--line); background: var(--panel); border-radius: 9px; padding: 7px 10px; cursor: pointer;
+    }
+    .toggle[aria-pressed="true"] { border-color: currentColor; background: var(--panel-2); }
+    .toggle.person { color: var(--person); }
+    .toggle.scene { color: var(--scene); }
+    .toggle.object { color: var(--object); }
+    .toggle.interaction { color: var(--inferred); }
+    .toggle.structure { color: var(--observed); }
+    .toggle.identity { color: var(--warning); }
+    .clear-button { color: var(--muted); }
+    .search { margin-left: auto; width: min(240px, 100%); padding: 8px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--text); outline: none; }
+    .search:focus { border-color: var(--observed); }
+    .graph-shell { min-width: 930px; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: rgba(10, 25, 36, .75); }
+    .column-heads { display: grid; grid-template-columns: 30% 40% 30%; padding: 12px 42px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .14em; }
+    .column-heads span:nth-child(2) { text-align: center; }
+    .column-heads span:nth-child(3) { text-align: right; }
+    svg { display: block; width: 100%; min-height: 560px; }
+    .edge { fill: none; stroke: #567183; stroke-width: 1.7; opacity: .58; pointer-events: none; transition: opacity .15s, stroke-width .15s; }
+    .edge.inferred { stroke: var(--inferred); stroke-dasharray: 5 5; opacity: .42; }
+    .edge.identity { stroke: var(--warning); stroke-dasharray: 3 4; }
+    .edge.selected { opacity: 1; stroke-width: 3.5; }
+    .edge-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
+    .node { cursor: pointer; outline: none; }
+    .node rect { fill: #10212e; stroke-width: 1.6; transition: filter .15s, stroke-width .15s; }
+    .node:hover rect, .node:focus rect, .node.selected rect { filter: brightness(1.28); stroke-width: 3; }
+    .node.person rect { stroke: var(--person); }
+    .node.scene rect { stroke: var(--scene); }
+    .node.object rect { stroke: var(--object); }
+    .node text { fill: var(--text); pointer-events: none; }
+    .node .subtitle { fill: var(--muted); font-size: 11px; }
+    .empty { color: var(--muted); text-align: center; padding: 80px 20px; }
+    aside { border-left: 1px solid var(--line); background: rgba(7, 16, 24, .84); padding: 22px; overflow: auto; }
+    aside h2 { margin: 4px 0 0; font-size: 21px; line-height: 1.25; overflow-wrap: anywhere; }
+    .detail-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .detail-meta span { padding: 3px 7px; border-radius: 6px; background: var(--panel-2); color: var(--muted); font-size: 11px; }
+    dl { margin: 22px 0 0; }
+    dt { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .08em; margin-top: 14px; text-transform: uppercase; }
+    dd { margin: 4px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+    .evidence { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+    .evidence-list { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font: 12px/1.6 ui-monospace, monospace; overflow-wrap: anywhere; }
+    .gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 9px; }
+    .gallery button { border: 1px solid var(--line); border-radius: 9px; padding: 0; overflow: hidden; background: var(--panel); cursor: pointer; text-align: left; }
+    .gallery img { display: block; width: 100%; aspect-ratio: 16/10; object-fit: cover; }
+    .gallery span { display: block; padding: 6px 7px; color: var(--muted); font-size: 10px; }
+    dialog { width: min(1050px, 92vw); max-height: 92vh; padding: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--text); }
+    dialog::backdrop { background: rgba(0, 0, 0, .78); }
+    dialog img { display: block; width: 100%; max-height: 82vh; object-fit: contain; background: #000; }
+    dialog button { position: absolute; top: 10px; right: 10px; border: 1px solid var(--line); border-radius: 999px; background: rgba(7,16,24,.85); padding: 7px 11px; cursor: pointer; }
+    @media (max-width: 940px) {
+      .workspace { display: block; }
+      aside { border-left: 0; border-top: 1px solid var(--line); }
+      .headline-row { align-items: start; flex-direction: column; }
+      .search { margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="headline-row">
+      <div><div class="eyebrow">HT Vision Lab</div><h1>多模态场景图</h1></div>
+      <div class="status"><span id="status-dot" class="status-dot"></span><span id="status">正在读取场景图</span></div>
+    </div>
+    <div id="stats" class="stats"></div>
+  </header>
+  <section class="timeline-wrap">
+    <div class="section-label">场景时间轴 · 点击场景进行聚焦，再次点击取消</div>
+    <div id="timeline" class="timeline"></div>
+  </section>
+  <main class="workspace">
+    <section class="canvas">
+      <div class="toolbar">
+        <button class="toggle person" data-node-filter="person" aria-pressed="true">人物</button>
+        <button class="toggle scene" data-node-filter="scene" aria-pressed="true">场景</button>
+        <button class="toggle object" data-node-filter="object" aria-pressed="true">物体</button>
+        <button class="toggle interaction" data-edge-filter="interaction" aria-pressed="true">语义交互</button>
+        <button class="toggle structure" data-edge-filter="structure" aria-pressed="true">结构关系</button>
+        <button class="toggle identity" data-edge-filter="identity" aria-pressed="true">身份候选</button>
+        <button id="clear" class="clear-button">显示全部场景</button>
+        <input id="search" class="search" type="search" placeholder="搜索人物、场景或物体">
+      </div>
+      <div class="graph-shell">
+        <div class="column-heads"><span>人物</span><span>场景</span><span>物体</span></div>
+        <svg id="graph" role="img" aria-label="人物、场景、物体与交互关系图"></svg>
+      </div>
+      <div id="empty" class="empty" hidden>当前筛选条件下没有可显示的节点。</div>
+    </section>
+    <aside>
+      <div class="section-label">详情与证据</div>
+      <h2 id="detail-title">选择一个节点或关系</h2>
+      <div id="detail-meta" class="detail-meta"></div>
+      <dl id="detail-fields"></dl>
+      <section id="keyframe-section" class="evidence" hidden>
+        <div class="section-label">关键帧</div>
+        <div id="gallery" class="gallery"></div>
+      </section>
+      <section id="evidence-section" class="evidence" hidden>
+        <div class="section-label">来源证据 ID</div>
+        <ul id="evidence-list" class="evidence-list"></ul>
+      </section>
+    </aside>
+  </main>
+  <dialog id="preview"><button id="close-preview">关闭</button><img id="preview-image" alt="关键帧预览"></dialog>
+  <script>
+    const SVG = 'http://www.w3.org/2000/svg';
+    const structural = new Set(['present_in', 'contains', 'followed_by']);
+    const labels = {
+      person: '人物', scene: '场景', object: '物体', observed: '观察', inferred: '推断',
+      present_in: '出现在', contains: '包含', followed_by: '随后', identity_candidate: '身份候选',
+      speaking: '说话', listening: '倾听', presenting: '展示', showing: '展示', holding: '持有',
+      using: '使用', pointing_to: '指向', sitting_with: '同坐', standing_with: '同站', touching: '接触', other: '其他'
+    };
+    const state = {
+      payload: null, etag: '', selectedScene: null, selectedId: null,
+      nodeFilters: {person: true, scene: true, object: true},
+      edgeFilters: {interaction: true, structure: true, identity: true}, search: ''
+    };
+
+    const byId = id => document.getElementById(id);
+    const formatTime = milliseconds => {
+      const total = Math.max(0, Number(milliseconds || 0)) / 1000;
+      const minutes = Math.floor(total / 60);
+      return `${String(minutes).padStart(2, '0')}:${(total % 60).toFixed(1).padStart(4, '0')}`;
+    };
+    const truncate = (value, size) => String(value || '').length > size ? String(value).slice(0, size - 1) + '…' : String(value || '');
+    const valueText = value => Array.isArray(value) ? value.join('\n') : (value && typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value ?? '—'));
+    const scenes = () => state.payload.graph.nodes.filter(node => node.type === 'scene').sort((a, b) => a.attributes.start_ms - b.attributes.start_ms);
+
+    function setStatus(message, error = false) {
+      byId('status').textContent = message;
+      byId('status-dot').classList.toggle('error', error);
+    }
+
+    function renderStats() {
+      const stats = state.payload.graph.statistics;
+      const values = [['人物', stats.persons], ['场景', stats.scenes], ['物体', stats.objects], ['交互', stats.interactions], ['关系', stats.edges]];
+      byId('stats').replaceChildren(...values.map(([name, count]) => {
+        const chip = document.createElement('span'); chip.className = 'chip';
+        const strong = document.createElement('strong'); strong.textContent = count;
+        chip.append(name + ' ', strong); return chip;
+      }));
+    }
+
+    function renderTimeline() {
+      const timeline = byId('timeline'); timeline.replaceChildren();
+      for (const scene of scenes()) {
+        const button = document.createElement('button');
+        const duration = Math.max(1, scene.attributes.duration_ms);
+        button.style.flexGrow = String(Math.max(1, Math.sqrt(duration / 1000)));
+        button.classList.toggle('active', scene.id === state.selectedScene);
+        button.title = scene.label;
+        const time = document.createElement('span'); time.className = 'time';
+        time.textContent = `${formatTime(scene.attributes.start_ms)}–${formatTime(scene.attributes.end_ms)}`;
+        const name = document.createElement('span'); name.className = 'name'; name.textContent = scene.label;
+        const category = document.createElement('span'); category.className = 'category'; category.textContent = scene.attributes.environment_category;
+        button.append(time, name, category);
+        button.addEventListener('click', () => {
+          state.selectedScene = state.selectedScene === scene.id ? null : scene.id;
+          state.selectedId = state.selectedScene;
+          renderAll();
+          if (state.selectedId) showNode(scene);
+        });
+        timeline.append(button);
+      }
+    }
+
+    function selectedSceneRange() {
+      const scene = scenes().find(item => item.id === state.selectedScene);
+      return scene ? [scene.attributes.start_ms, scene.attributes.end_ms] : null;
+    }
+
+    function graphSelection() {
+      const graph = state.payload.graph;
+      const allNodes = new Map(graph.nodes.map(node => [node.id, node]));
+      let candidateIds = new Set(allNodes.keys());
+      let candidateEdges = graph.edges;
+      const range = selectedSceneRange();
+      if (range) {
+        const [start, end] = range;
+        const currentObjects = new Set(graph.nodes.filter(node => node.type === 'object' && node.attributes.scene_id === state.selectedScene).map(node => node.id));
+        candidateIds = new Set([state.selectedScene, ...currentObjects]);
+        candidateEdges = graph.edges.filter(edge => {
+          if (edge.predicate === 'followed_by') return false;
+          if (edge.source === state.selectedScene || edge.target === state.selectedScene) return true;
+          if (currentObjects.has(edge.source) || currentObjects.has(edge.target)) return true;
+          return edge.predicate !== 'identity_candidate' && edge.end_ms > start && edge.start_ms < end;
+        });
+        for (const edge of candidateEdges) { candidateIds.add(edge.source); candidateIds.add(edge.target); }
+        const identityEdges = graph.edges.filter(edge => edge.predicate === 'identity_candidate' && (candidateIds.has(edge.source) || candidateIds.has(edge.target)));
+        candidateEdges.push(...identityEdges);
+        for (const edge of identityEdges) { candidateIds.add(edge.source); candidateIds.add(edge.target); }
+      }
+      const query = state.search.trim().toLocaleLowerCase();
+      const visibleNodes = graph.nodes.filter(node => candidateIds.has(node.id) && state.nodeFilters[node.type] && (!query || `${node.label} ${JSON.stringify(node.attributes)}`.toLocaleLowerCase().includes(query)));
+      const visibleIds = new Set(visibleNodes.map(node => node.id));
+      const visibleEdges = candidateEdges.filter(edge => {
+        if (!visibleIds.has(edge.source) || !visibleIds.has(edge.target)) return false;
+        if (edge.predicate === 'identity_candidate') return state.edgeFilters.identity;
+        if (structural.has(edge.predicate)) return state.edgeFilters.structure;
+        return state.edgeFilters.interaction;
+      });
+      return {nodes: visibleNodes, edges: visibleEdges, allNodes};
+    }
+
+    function positionNodes(nodes) {
+      const groups = {person: [], scene: [], object: []};
+      nodes.forEach(node => groups[node.type].push(node));
+      groups.person.sort((a, b) => a.label.localeCompare(b.label));
+      groups.scene.sort((a, b) => a.attributes.start_ms - b.attributes.start_ms);
+      groups.object.sort((a, b) => (a.attributes.scene_id || '').localeCompare(b.attributes.scene_id || '') || a.label.localeCompare(b.label));
+      const specs = {person: {x: 42, w: 220, step: 76}, scene: {x: 397, w: 330, step: 118}, object: {x: 860, w: 220, step: 70}};
+      const positions = new Map(); let height = 560;
+      for (const type of Object.keys(groups)) {
+        const spec = specs[type];
+        groups[type].forEach((node, index) => positions.set(node.id, {x: spec.x, y: 50 + index * spec.step, w: spec.w, h: type === 'scene' ? 78 : 58}));
+        height = Math.max(height, 100 + groups[type].length * spec.step);
+      }
+      return {positions, height};
+    }
+
+    function pathFor(source, target) {
+      const sx = target.x >= source.x ? source.x + source.w : source.x;
+      const tx = target.x >= source.x ? target.x : target.x + target.w;
+      const sy = source.y + source.h / 2, ty = target.y + target.h / 2;
+      const bend = Math.max(70, Math.abs(tx - sx) * .45);
+      const direction = tx >= sx ? 1 : -1;
+      return `M ${sx} ${sy} C ${sx + bend * direction} ${sy}, ${tx - bend * direction} ${ty}, ${tx} ${ty}`;
+    }
+
+    function edgeClass(edge) {
+      const values = ['edge', edge.epistemic_status];
+      if (edge.predicate === 'identity_candidate') values.push('identity');
+      if (state.selectedId === edge.id) values.push('selected');
+      return values.join(' ');
+    }
+
+    function renderGraph() {
+      const svg = byId('graph'); svg.replaceChildren();
+      const {nodes, edges, allNodes} = graphSelection();
+      byId('empty').hidden = nodes.length !== 0;
+      byId('graph').parentElement.hidden = nodes.length === 0;
+      if (!nodes.length) return;
+      const {positions, height} = positionNodes(nodes);
+      svg.setAttribute('viewBox', `0 0 1120 ${height}`);
+      svg.style.height = `${height}px`;
+      const defs = document.createElementNS(SVG, 'defs');
+      const marker = document.createElementNS(SVG, 'marker');
+      marker.setAttribute('id', 'arrow'); marker.setAttribute('viewBox', '0 0 10 10'); marker.setAttribute('refX', '8'); marker.setAttribute('refY', '5'); marker.setAttribute('markerWidth', '5'); marker.setAttribute('markerHeight', '5'); marker.setAttribute('orient', 'auto-start-reverse');
+      const arrow = document.createElementNS(SVG, 'path'); arrow.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z'); arrow.setAttribute('fill', '#7890a0');
+      marker.append(arrow); defs.append(marker); svg.append(defs);
+      for (const edge of edges) {
+        const source = positions.get(edge.source), target = positions.get(edge.target);
+        if (!source || !target) continue;
+        const d = pathFor(source, target);
+        const hit = document.createElementNS(SVG, 'path'); hit.setAttribute('d', d); hit.setAttribute('class', 'edge-hit');
+        const path = document.createElementNS(SVG, 'path'); path.setAttribute('d', d); path.setAttribute('class', edgeClass(edge)); path.setAttribute('marker-end', 'url(#arrow)');
+        const sourceNode = allNodes.get(edge.source), targetNode = allNodes.get(edge.target);
+        hit.setAttribute('role', 'button'); hit.setAttribute('tabindex', '0');
+        hit.setAttribute('aria-label', `关系 ${labels[edge.predicate] || edge.predicate}：${sourceNode?.label || edge.source} → ${targetNode?.label || edge.target}`);
+        const selectEdge = event => { event.stopPropagation(); state.selectedId = edge.id; showEdge(edge, allNodes); renderGraph(); };
+        hit.addEventListener('click', selectEdge);
+        hit.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') selectEdge(event); });
+        svg.append(hit, path);
+      }
+      for (const node of nodes) {
+        const box = positions.get(node.id);
+        const group = document.createElementNS(SVG, 'g'); group.setAttribute('class', `node ${node.type}${state.selectedId === node.id ? ' selected' : ''}`); group.setAttribute('tabindex', '0'); group.setAttribute('role', 'button'); group.setAttribute('aria-label', `${labels[node.type] || node.type}：${node.label}`);
+        const rect = document.createElementNS(SVG, 'rect'); rect.setAttribute('x', box.x); rect.setAttribute('y', box.y); rect.setAttribute('width', box.w); rect.setAttribute('height', box.h); rect.setAttribute('rx', '11');
+        const title = document.createElementNS(SVG, 'text'); title.setAttribute('x', box.x + 14); title.setAttribute('y', box.y + 24); title.setAttribute('font-size', node.type === 'scene' ? '14' : '13'); title.setAttribute('font-weight', '700'); title.textContent = truncate(node.label, node.type === 'scene' ? 36 : 25);
+        const subtitle = document.createElementNS(SVG, 'text'); subtitle.setAttribute('x', box.x + 14); subtitle.setAttribute('y', box.y + (node.type === 'scene' ? 52 : 43)); subtitle.setAttribute('class', 'subtitle');
+        subtitle.textContent = node.type === 'scene' ? `${formatTime(node.attributes.start_ms)}–${formatTime(node.attributes.end_ms)} · ${node.attributes.environment_category}` : node.type === 'person' ? (node.attributes.speaker_label ? `说话人 ${node.attributes.speaker_label} · ${node.attributes.identity_status}` : node.attributes.identity_status) : `数量 ${node.attributes.count} · ${node.attributes.regions.join(' / ')}`;
+        group.append(rect, title, subtitle);
+        const select = event => { event?.stopPropagation(); state.selectedId = node.id; if (node.type === 'scene') state.selectedScene = node.id; showNode(node); renderTimeline(); renderGraph(); };
+        group.addEventListener('click', select); group.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') select(event); });
+        svg.append(group);
+      }
+      svg.onclick = () => { state.selectedId = null; renderGraph(); };
+    }
+
+    function resetDetails() {
+      byId('detail-title').textContent = '选择一个节点或关系';
+      byId('detail-meta').replaceChildren(); byId('detail-fields').replaceChildren();
+      byId('keyframe-section').hidden = true; byId('evidence-section').hidden = true;
+    }
+
+    function addMeta(values) {
+      const root = byId('detail-meta'); root.replaceChildren();
+      for (const value of values) { const item = document.createElement('span'); item.textContent = value; root.append(item); }
+    }
+
+    function addFields(entries) {
+      const root = byId('detail-fields'); root.replaceChildren();
+      for (const [name, value] of entries) {
+        const term = document.createElement('dt'); term.textContent = name;
+        const description = document.createElement('dd'); description.textContent = valueText(value);
+        root.append(term, description);
+      }
+    }
+
+    function showEvidence(refs) {
+      const section = byId('evidence-section'), list = byId('evidence-list'); list.replaceChildren();
+      section.hidden = !refs.length;
+      for (const ref of refs) { const item = document.createElement('li'); item.textContent = ref; list.append(item); }
+    }
+
+    function showKeyframes(scene) {
+      const wanted = new Set(scene.attributes.keyframe_ids || []);
+      const frames = state.payload.assets.keyframes.filter(frame => wanted.has(frame.id));
+      const section = byId('keyframe-section'), gallery = byId('gallery'); gallery.replaceChildren(); section.hidden = !frames.length;
+      for (const frame of frames) {
+        const button = document.createElement('button'); button.title = `查看 ${frame.id}`;
+        const image = document.createElement('img'); image.src = frame.url; image.alt = `${frame.id} 标注关键帧`; image.loading = 'lazy';
+        const label = document.createElement('span'); label.textContent = `${frame.id} · ${formatTime(frame.timestamp_ms)}`;
+        button.append(image, label); button.addEventListener('click', () => { byId('preview-image').src = frame.url; byId('preview-image').alt = image.alt; byId('preview').showModal(); });
+        gallery.append(button);
+      }
+    }
+
+    function showNode(node) {
+      byId('detail-title').textContent = node.label;
+      addMeta([labels[node.type] || node.type, labels[node.epistemic_status] || node.epistemic_status, node.confidence == null ? '置信度未知' : `置信度 ${(node.confidence * 100).toFixed(1)}%`]);
+      const entries = Object.entries(node.attributes).map(([name, value]) => [name, value]);
+      addFields(entries); showEvidence(node.evidence_refs || []);
+      if (node.type === 'scene') showKeyframes(node); else byId('keyframe-section').hidden = true;
+    }
+
+    function showEdge(edge, nodes) {
+      const source = nodes.get(edge.source), target = nodes.get(edge.target);
+      byId('detail-title').textContent = labels[edge.predicate] || edge.predicate;
+      addMeta(['关系', labels[edge.epistemic_status] || edge.epistemic_status, `置信度 ${(edge.confidence * 100).toFixed(1)}%`]);
+      addFields([
+        ['起点', source ? `${source.label} (${edge.source})` : edge.source],
+        ['终点', target ? `${target.label} (${edge.target})` : edge.target],
+        ['时间', `${formatTime(edge.start_ms)}–${formatTime(edge.end_ms)}`],
+        ...Object.entries(edge.attributes)
+      ]);
+      showEvidence(edge.evidence_refs || []); byId('keyframe-section').hidden = true;
+    }
+
+    function renderAll() { renderStats(); renderTimeline(); renderGraph(); if (!state.selectedId) resetDetails(); }
+
+    async function load() {
+      try {
+        const headers = state.etag ? {'If-None-Match': state.etag} : {};
+        const response = await fetch('/api/graph', {cache: 'no-store', headers});
+        if (response.status === 304) { setStatus('图数据已是最新'); return; }
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+        state.payload = data; state.etag = response.headers.get('ETag') || '';
+        if (state.selectedScene && !data.graph.nodes.some(node => node.id === state.selectedScene)) state.selectedScene = null;
+        setStatus(`已载入 ${data.graph.statistics.nodes} 个节点`); renderAll();
+      } catch (error) { setStatus(error.message, true); }
+    }
+
+    document.querySelectorAll('[data-node-filter]').forEach(button => button.addEventListener('click', () => {
+      const key = button.dataset.nodeFilter; state.nodeFilters[key] = !state.nodeFilters[key]; button.setAttribute('aria-pressed', String(state.nodeFilters[key])); renderGraph();
+    }));
+    document.querySelectorAll('[data-edge-filter]').forEach(button => button.addEventListener('click', () => {
+      const key = button.dataset.edgeFilter; state.edgeFilters[key] = !state.edgeFilters[key]; button.setAttribute('aria-pressed', String(state.edgeFilters[key])); renderGraph();
+    }));
+    byId('search').addEventListener('input', event => { state.search = event.target.value; renderGraph(); });
+    byId('clear').addEventListener('click', () => { state.selectedScene = null; state.selectedId = null; renderAll(); resetDetails(); });
+    byId('close-preview').addEventListener('click', () => byId('preview').close());
+    byId('preview').addEventListener('click', event => { if (event.target === byId('preview')) byId('preview').close(); });
+    load(); setInterval(load, 5000);
+  </script>
+</body>
+</html>

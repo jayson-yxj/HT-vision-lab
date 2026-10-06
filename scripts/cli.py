@@ -127,6 +127,14 @@ def _parser() -> argparse.ArgumentParser:
     )
     validate_graph.add_argument("json_path", type=Path)
 
+    visualize_graph = commands.add_parser(
+        "visualize-scene-graph", help="Serve the interactive multimodal scene graph"
+    )
+    visualize_graph.add_argument("graph_json", type=Path)
+    visualize_graph.add_argument("--host", default="127.0.0.1")
+    visualize_graph.add_argument("--port", type=int, default=8765)
+    visualize_graph.add_argument("--no-open", action="store_true")
+
     participants = commands.add_parser(
         "project-participants",
         help="Project visual identities into an existing participant context",
@@ -390,6 +398,15 @@ def main() -> int:
                 return 1
             print(f"PASS: {args.json_path}")
             return 0
+        if args.command == "visualize-scene-graph":
+            from .scene_graph_server import serve_scene_graph
+
+            return serve_scene_graph(
+                args.graph_json,
+                host=args.host,
+                port=args.port,
+                open_browser=not args.no_open,
+            )
         if args.command == "project-participants":
             from .multimodal_context import project_multimodal_context
 
