@@ -16,6 +16,7 @@ def _parser() -> argparse.ArgumentParser:
     commands.add_parser("fetch-models", help="Download and verify pinned local models")
     commands.add_parser("status", help="Show runtime and model status")
     commands.add_parser("asd-status", help="Show PyTorch and LR-ASD runtime status")
+    commands.add_parser("login-groq", help="Securely save a Groq API key for vision analysis")
 
     track = commands.add_parser("track-faces", help="Build session-local face tracks for a video")
     track.add_argument("video", type=Path)
@@ -95,6 +96,23 @@ def _parser() -> argparse.ArgumentParser:
     )
     validate_scenes.add_argument("json_path", type=Path)
 
+    semantics = commands.add_parser(
+        "analyze-scene-semantics",
+        help="Use Qwen3.8 to infer environments, objects and interactions from keyframes",
+    )
+    semantics.add_argument("scene_json", type=Path)
+    semantics.add_argument("--output", type=Path)
+    semantics.add_argument("--model", default="qwen/qwen3.8-27b")
+    semantics.add_argument("--timeout", type=float, default=60.0)
+    semantics.add_argument("--groq-proxy")
+    semantics.add_argument("--minimum-interval", type=float, default=0.2)
+    semantics.add_argument("--batch-size", type=int, choices=(1, 2, 3), default=2)
+
+    validate_semantics = commands.add_parser(
+        "validate-scene-semantics", help="Validate Qwen scene semantics"
+    )
+    validate_semantics.add_argument("json_path", type=Path)
+
     participants = commands.add_parser(
         "project-participants",
         help="Project visual identities into an existing participant context",
@@ -133,6 +151,10 @@ def main() -> int:
                 valid, reason = verify_model(name)
                 print(f"{name}: {reason if valid else 'unavailable: ' + reason}")
             return 0
+        if args.command == "login-groq":
+            from .groq_client import login
+
+            return login()
         if args.command == "track-faces":
             data = analyze_video(
                 args.video,
@@ -281,6 +303,45 @@ def main() -> int:
                 return 1
             print(f"PASS: {args.json_path}")
             return 0
+        if args.command == "analyze-scene-semantics":
+            from .scene_semantics import analyze_scene_semantics
+
+            data = analyze_scene_semantics(
+                args.scene_json,
+                output_path=args.output,
+                model=args.model,
+                timeout=args.timeout,
+                proxy=args.groq_proxy,
+                minimum_interval=args.minimum_interval,
+                batch_size=args.batch_size,
+                progress=lambda message: print(f"[semantics] {message}", flush=True),
+            )
+            output = (
+                args.output.expanduser().resolve()
+                if args.output
+                else args.scene_json.expanduser().resolve().parent / "scene_semantics.json"
+            )
+            stats = data["statistics"]
+            print(f"[done] {output}")
+            print(
+                f"[semantics] status={data['status']}, "
+                f"keyframes={stats['analyzed_keyframes']}/{stats['keyframes']}, "
+                f"objects={stats['semantic_objects']}, interactions={stats['interactions']}"
+            )
+            for warning in data["warnings"]:
+                print(f"[warning] {warning}")
+            return 0 if data["status"] == "complete" else 1
+        if args.command == "validate-scene-semantics":
+            from .scene_semantics import validate_scene_semantics
+
+            with args.json_path.open(encoding="utf-8") as handle:
+                errors = validate_scene_semantics(json.load(handle))
+            if errors:
+                for error in errors:
+                    print(f"ERROR: {error}", file=sys.stderr)
+                return 1
+            print(f"PASS: {args.json_path}")
+            return 0
         if args.command == "project-participants":
             from .multimodal_context import project_multimodal_context
 
@@ -314,7 +375,7 @@ def main() -> int:
                 return 1
             print(f"PASS: {args.json_path}")
             return 0
-    except (FileNotFoundError, RuntimeError, ValueError) as error:
+    except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
     return 2

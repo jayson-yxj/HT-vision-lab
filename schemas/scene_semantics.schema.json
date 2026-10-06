@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hightorque.local/schemas/scene-semantics-v1.json",
+  "title": "HT Vision Lab inferred scene semantics",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "context_type", "session_id", "created_at", "status", "source", "provider", "analyses", "requests", "failed_batches", "statistics", "warnings"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "context_type": {"const": "visual_scene_semantics"},
+    "session_id": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "status": {"enum": ["complete", "partial"]},
+    "source": {"$ref": "#/$defs/source"},
+    "provider": {"$ref": "#/$defs/provider"},
+    "analyses": {"type": "array", "items": {"$ref": "#/$defs/analysis"}},
+    "requests": {"type": "array", "items": {"$ref": "#/$defs/request"}},
+    "failed_batches": {"type": "array", "items": {"$ref": "#/$defs/failedBatch"}},
+    "statistics": {"$ref": "#/$defs/statistics"},
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scene_context_path", "scene_context_sha256", "visual_tracks_path", "visual_tracks_sha256", "speech_timeline"],
+      "properties": {
+        "scene_context_path": {"type": "string"},
+        "scene_context_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "visual_tracks_path": {"type": "string"},
+        "visual_tracks_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "speech_timeline": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256", "timeline_offset_ms"],
+          "properties": {
+            "path": {"type": ["string", "null"]},
+            "sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+            "timeline_offset_ms": {"type": "integer"}
+          }
+        }
+      }
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "model", "prompt_version", "batch_size"],
+      "properties": {
+        "name": {"const": "groq"},
+        "model": {"type": "string", "minLength": 1},
+        "prompt_version": {"const": "scene-semantics-qwen3.8-v2"},
+        "batch_size": {"type": "integer", "minimum": 1, "maximum": 3}
+      }
+    },
+    "analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["analysis_id", "keyframe_id", "shot_id", "environment", "objects", "interactions"],
+      "properties": {
+        "analysis_id": {"type": "string", "pattern": "^scene-analysis-[0-9]{6}$"},
+        "keyframe_id": {"type": "string"},
+        "shot_id": {"type": "string"},
+        "environment": {"$ref": "#/$defs/environment"},
+        "objects": {"type": "array", "items": {"$ref": "#/$defs/semanticObject"}},
+        "interactions": {"type": "array", "items": {"$ref": "#/$defs/interaction"}}
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "description", "confidence", "epistemic_status"],
+      "properties": {
+        "category": {"enum": ["indoor_meeting", "indoor_office", "indoor_studio", "indoor_home", "indoor_public", "outdoor_public", "outdoor_nature", "stage", "vehicle", "graphic_or_title", "other", "unknown"]},
+        "description": {"type": "string"},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "epistemic_status": {"const": "inferred"}
+      }
+    },
+    "semanticObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["semantic_object_id", "label", "count", "region", "confidence", "epistemic_status"],
+      "properties": {
+        "semantic_object_id": {"type": "string", "pattern": "^semantic-object-[0-9]{6}$"},
+        "label": {"type": "string", "minLength": 1},
+        "count": {"type": "integer", "minimum": 1},
+        "region": {"enum": ["left", "center", "right", "foreground", "background", "whole_frame", "unknown"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "epistemic_status": {"const": "inferred"}
+      }
+    },
+    "interaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["interaction_id", "subject_ref", "predicate", "object_ref", "description", "evidence_basis", "epistemic_status", "confidence"],
+      "properties": {
+        "interaction_id": {"type": "string", "pattern": "^interaction-[0-9]{6}$"},
+        "subject_ref": {"type": "string", "pattern": "^Face-[0-9]{2}$"},
+        "predicate": {"enum": ["speaking", "listening", "presenting", "showing", "holding", "using", "pointing_to", "sitting_with", "standing_with", "touching", "other"]},
+        "object_ref": {"type": ["string", "null"]},
+        "description": {"type": "string"},
+        "evidence_basis": {"type": "array", "items": {"enum": ["image", "transcript", "geometry"]}},
+        "epistemic_status": {"const": "inferred"},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["batch_id", "keyframe_ids", "request_sha256", "cache_hit"],
+      "properties": {
+        "batch_id": {"type": "string"},
+        "keyframe_ids": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"type": "string"}},
+        "request_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "cache_hit": {"type": "boolean"}
+      }
+    },
+    "failedBatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["batch_id", "keyframe_ids", "error"],
+      "properties": {
+        "batch_id": {"type": "string"},
+        "keyframe_ids": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"type": "string"}},
+        "error": {"type": "string"}
+      }
+    },
+    "statistics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["keyframes", "analyzed_keyframes", "semantic_objects", "interactions", "requests", "failed_batches"],
+      "properties": {
+        "keyframes": {"type": "integer", "minimum": 0},
+        "analyzed_keyframes": {"type": "integer", "minimum": 0},
+        "semantic_objects": {"type": "integer", "minimum": 0},
+        "interactions": {"type": "integer", "minimum": 0},
+        "requests": {"type": "integer", "minimum": 0},
+        "failed_batches": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}
