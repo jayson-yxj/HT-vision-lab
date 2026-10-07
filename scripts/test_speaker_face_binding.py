@@ -81,8 +81,32 @@ def test_rejects_raw_sortformer_slots() -> None:
             raise AssertionError("raw Sortformer slot was accepted")
 
 
+def test_default_keeps_short_visual_evidence_as_candidate() -> None:
+    visual = {
+        "source": {"duration_ms": 2500},
+        "processing": {},
+        "active_speaker_segments": [
+            {"segment_id": "active-1", "face_id": "Face-01", "start_ms": 0, "end_ms": 2500}
+        ],
+        "speaker_face_associations": [],
+        "statistics": {},
+        "warnings": [],
+    }
+    speech = [{"id": "span-a", "speaker": "A", "start_s": 0.0, "end_s": 2.5}]
+    with tempfile.TemporaryDirectory() as directory:
+        visual_path = Path(directory) / "visual.json"
+        speech_path = Path(directory) / "speech.json"
+        visual_path.write_text(json.dumps(visual), encoding="utf-8")
+        speech_path.write_text(json.dumps(speech), encoding="utf-8")
+        result = bind_speakers_to_faces(visual_path, speech_path)
+    association = result["speaker_face_associations"][0]
+    assert association["face_id"] == "Face-01"
+    assert association["status"] == "candidate"
+
+
 if __name__ == "__main__":
     test_global_assignment_avoids_greedy_face_conflict()
     test_one_to_one_binding_and_offscreen_status()
     test_rejects_raw_sortformer_slots()
+    test_default_keeps_short_visual_evidence_as_candidate()
     print("PASS: speaker-face temporal binding")

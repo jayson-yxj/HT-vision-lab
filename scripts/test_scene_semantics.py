@@ -9,8 +9,9 @@ import cv2
 import numpy as np
 
 from scripts.scene_semantics import (
+    _canonical_object_label,
     _is_scene_object,
-    _repair_graphic_environment,
+    _repair_environment,
     _visual_reuse_plan,
     analyze_scene_semantics,
     validate_scene_semantics,
@@ -317,7 +318,7 @@ def test_similar_frames_reuse_model_environment_without_copying_interactions() -
 
 
 def test_low_confidence_logo_frame_is_classified_as_graphic() -> None:
-    repaired = _repair_graphic_environment(
+    repaired = _repair_environment(
         {"category": "outdoor_public", "description": "无可见环境", "confidence": 0.0},
         [{"label": "logo", "confidence": 0.0}],
     )
@@ -335,6 +336,20 @@ def test_video_overlays_are_not_scene_objects() -> None:
     assert not _is_scene_object({"label": "logo"}, outdoor)
     assert not _is_scene_object({"label": "subtitle"}, title)
     assert not _is_scene_object({"label": "text"}, title)
+
+
+def test_environment_and_object_labels_are_normalized() -> None:
+    repaired = _repair_environment(
+        {"category": "indoor_office", "description": "室内起居室，有沙发。", "confidence": 0.8},
+        [],
+    )
+    assert repaired["category"] == "indoor_home"
+    assert _repair_environment(
+        {"category": "indoor_office", "description": "A dark presentation stage.", "confidence": 0.8},
+        [],
+    )["category"] == "stage"
+    assert _canonical_object_label("mic") == "microphone"
+    assert _canonical_object_label("potted plant") == "plant"
 
 
 def test_spatial_histograms_reject_matching_colors_in_different_layouts() -> None:
@@ -361,5 +376,6 @@ if __name__ == "__main__":
     test_similar_frames_reuse_model_environment_without_copying_interactions()
     test_low_confidence_logo_frame_is_classified_as_graphic()
     test_video_overlays_are_not_scene_objects()
+    test_environment_and_object_labels_are_normalized()
     test_spatial_histograms_reject_matching_colors_in_different_layouts()
     print("PASS: Qwen scene semantics image batching, transcript evidence and cache")

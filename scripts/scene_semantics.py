@@ -585,8 +585,17 @@ def _mark_batch_for_fallback(
     )
 
 
-def _repair_graphic_environment(environment: dict, objects: Sequence[dict]) -> dict:
+def _repair_environment(environment: dict, objects: Sequence[dict]) -> dict:
     repaired = copy.deepcopy(environment)
+    description = str(repaired.get("description", "")).casefold()
+    if repaired.get("category") == "indoor_office":
+        if any(term in description for term in ("演讲舞台", "舞台", "stage")):
+            repaired["category"] = "stage"
+        elif any(
+            term in description
+            for term in ("起居室", "客厅", "住宅", "卧室", "living room", "residential", "home interior")
+        ):
+            repaired["category"] = "indoor_home"
     labels = {str(item.get("label", "")).strip().lower() for item in objects}
     if repaired.get("confidence", 0) <= 0.2 and labels & {
         "logo",
@@ -600,6 +609,14 @@ def _repair_graphic_environment(environment: dict, objects: Sequence[dict]) -> d
             confidence=0.6,
         )
     return repaired
+
+
+def _canonical_object_label(value: str) -> str:
+    key = "_".join(value.strip().casefold().replace("-", " ").split())
+    return {
+        "mic": "microphone",
+        "potted_plant": "plant",
+    }.get(key, key)
 
 
 def _is_scene_object(value: dict, environment: dict) -> bool:
@@ -621,7 +638,7 @@ def _normalize_analyses(
     object_count, interaction_count = object_offset, interaction_offset
     for index, item in enumerate(raw, start=1):
         keyframe_id = item["keyframe_id"]
-        environment = _repair_graphic_environment(item["environment"], item["objects"])
+        environment = _repair_environment(item["environment"], item["objects"])
         objects = []
         for value in item["objects"]:
             if not _is_scene_object(value, environment):
@@ -630,7 +647,7 @@ def _normalize_analyses(
             objects.append(
                 {
                     "semantic_object_id": f"semantic-object-{object_count:06d}",
-                    **value,
+                    **{**value, "label": _canonical_object_label(value["label"])},
                     "epistemic_status": "inferred",
                 }
             )

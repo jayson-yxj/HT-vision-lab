@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "context_type": "vision_evaluation_annotations",
+  "sample_id": "cctv-stage-4speakers-v1",
+  "source": {
+    "video_sha256": "2f9a74ad3cbba7e3d2b2b742ac28992dbd1879253b7401280cd3d59aa704ca2e",
+    "duration_ms": 102040
+  },
+  "provenance": {
+    "method": "manual_evidence_review",
+    "reviewed_at": "2026-10-07",
+    "notes": "Six representative frames were reviewed against the original and Face-ID overlay. This sample evaluates low-resolution Chinese stage footage, wide shots, robot inserts, indoor/outdoor transitions, and salient objects; no matching speech timeline is available for identity scoring."
+  },
+  "identity_bindings": [],
+  "object_vocabulary": [
+    "microphone", "chair", "screen", "robot", "desk", "tree", "building", "sofa", "bottle"
+  ],
+  "keyframes": [
+    {
+      "keyframe_id": "keyframe-00001",
+      "timestamp_ms": 7000,
+      "environment_category": "indoor_studio",
+      "object_labels": ["microphone", "chair"]
+    },
+    {
+      "keyframe_id": "keyframe-00005",
+      "timestamp_ms": 36920,
+      "environment_category": "indoor_studio",
+      "object_labels": ["chair", "screen"]
+    },
+    {
+      "keyframe_id": "keyframe-00009",
+      "timestamp_ms": 55000,
+      "environment_category": "indoor_public",
+      "object_labels": ["robot"]
+    },
+    {
+      "keyframe_id": "keyframe-00010",
+      "timestamp_ms": 59560,
+      "environment_category": "indoor_office",
+      "object_labels": ["robot", "desk"]
+    },
+    {
+      "keyframe_id": "keyframe-00011",
+      "timestamp_ms": 60960,
+      "environment_category": "outdoor_public",
+      "object_labels": ["robot", "tree", "building"]
+    },
+    {
+      "keyframe_id": "keyframe-00017",
+      "timestamp_ms": 99000,
+      "environment_category": "indoor_studio",
+      "object_labels": ["microphone", "sofa", "bottle"]
+    }
+  ]
+}

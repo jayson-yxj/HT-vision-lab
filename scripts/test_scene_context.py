@@ -12,6 +12,7 @@ from scripts.scene_context import (
     _select_keyframe,
     analyze_scenes,
     build_spatial_relations,
+    split_long_shots,
     validate_scene_context,
 )
 
@@ -60,6 +61,15 @@ def test_keyframe_selection_prioritizes_visible_people() -> None:
         Capture(), [1, 2], observations
     )
     assert selected == 1
+
+
+def test_long_shots_are_split_for_periodic_scene_evidence() -> None:
+    assert split_long_shots([(0, 15_000), (15_000, 82_000)], 30.0) == [
+        (0, 15_000),
+        (15_000, 45_000),
+        (45_000, 75_000),
+        (75_000, 82_000),
+    ]
 
 
 def _write_video(path: Path) -> None:
@@ -135,5 +145,6 @@ def test_real_pipeline_writes_shots_keyframes_and_positions() -> None:
 if __name__ == "__main__":
     test_spatial_relations_are_evidence_grounded()
     test_keyframe_selection_prioritizes_visible_people()
+    test_long_shots_are_split_for_periodic_scene_evidence()
     test_real_pipeline_writes_shots_keyframes_and_positions()
     print("PASS: scene context shots, keyframes and spatial relations")

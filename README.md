@@ -91,7 +91,7 @@ bash setup-asd.sh
   /home/sunteng/Desktop/HighTorque_vision/HT-voice-lab/results/example/speech_spans.json
 ```
 
-输入必须是声纹稳定后的 `A/B/C/D`，不接受原始 `speaker0…speaker3` 槽位。命令按时间重叠求全局一对一最优解，并输出 `confirmed`、`candidate`、`ambiguous` 或 `offscreen`。如果音频和视频片段起点不同，可用 `--timeline-offset-ms` 将语音时间整体平移后再匹配。
+输入必须是声纹稳定后的 `A/B/C/D`，不接受原始 `speaker0…speaker3` 槽位。命令按时间重叠求全局一对一最优解，并输出 `confirmed`、`candidate`、`ambiguous` 或 `offscreen`；默认至少累计 3 秒一致的可见发言证据才会确认身份，较短证据仍作为候选保留。如果音频和视频片段起点不同，可用 `--timeline-offset-ms` 将语音时间整体平移后再匹配。
 
 如果同一个语音标签落到多张可见人脸，先保留上述初始绑定，再用确认的人脸锚点纠正明显串号：
 
@@ -141,7 +141,7 @@ bash setup-asd.sh
 ./lab analyze-scenes results/example/visual_tracks.json
 ```
 
-默认生成 `scene_context.json` 和 `keyframes/`。每个镜头选择一张兼顾清晰度与可见人物的关键帧，记录 Face-ID、已确认的 A/B/C/D、归一化位置，以及 `left_of`、`above`、`co_visible_with`、`visually_close_to` 和画面重叠关系。关系只描述二维画面，不推断现实距离；首版有意不测量头部朝向。
+默认生成 `scene_context.json` 和 `keyframes/`。每个镜头选择一张兼顾清晰度与可见人物的关键帧；连续移动但没有硬切镜的长镜头每 30 秒至少采样一次，可用 `--max-shot-seconds` 调整。结果记录 Face-ID、已确认的 A/B/C/D、归一化位置，以及 `left_of`、`above`、`co_visible_with`、`visually_close_to` 和画面重叠关系。关系只描述二维画面，不推断现实距离；首版有意不测量头部朝向。
 
 检查场景协议：
 
@@ -209,19 +209,28 @@ bash setup-asd.sh
 
 ## 视觉基线评测
 
-仓库中的 `benchmarks/english-4speakers-long-v1.json` 是首个人工复核样例，覆盖四人绑定、室外访谈、步行过场、片头片尾和黑屏转场。它只保存视频哈希、关键帧 ID 和人工标签，不包含视频或图片。运行：
+仓库中有四个人工复核样例，覆盖四人户外访谈、中文低清舞台、暗光双人固定机位，以及在住宅和庭院间连续移动的跟拍视频。标注只保存视频哈希、关键帧 ID 和人工标签，不包含视频或图片。运行示例：
 
 ```bash
 ./lab evaluate-vision \
   benchmarks/english-4speakers-long-v1.json \
-  results/regression-english-full-multimodal/scene_context.json
+  results/regression-english-full-multimodal-v2/scene_context.json
 ```
 
 默认从 `scene_context.json` 的来源字段读取 `visual_tracks.json`，并读取同目录的 `scene_semantics.json`；也可通过 `--visual-json` 和 `--semantics-json` 显式指定。输出 `vision_evaluation_report.json`，其中人物绑定和环境使用准确率，物体、交互和二维空间关系使用 Precision、Recall 与 F1，最终宏平均只计算实际有人工标签的维度。
 
 标注文件中省略某个字段表示该维度不确定且不计分；显式写入空数组表示人工确认该帧没有对应对象。`object_vocabulary` 和 `interaction_predicates` 明确限定本次人工复核的范围，避免把同义家具、字幕水印或尚未标注的交互当成模型错误。物体数组应列出范围内全部显著物体，交互和空间关系数组应列出全部已确认关系。评测器会核对视频哈希、时长、关键帧时间、会话 ID 和上游文件哈希，避免把不同运行或不同视频的结果混在一起。
 
-当前四人长视频基线为：人物绑定准确率 1.000、环境准确率 1.000、物体 F1 0.836、发言交互 F1 1.000、二维空间关系 F1 1.000，五项宏平均 0.967。该结果只代表一个视频中的九张人工复核帧，不能替代更多场景的泛化测试。
+当前人工复核结果：
+
+| 标注 | 复核帧 | 实际计分维度 | 宏平均 |
+|---|---:|---|---:|
+| `english-4speakers-long-v1.json` | 9 | 身份、环境、物体、发言、二维空间 | 0.967 |
+| `cctv-stage-4speakers-v1.json` | 6 | 环境、物体 | 0.980 |
+| `english-dark-studio-2speakers-v1.json` | 2 | 身份、环境、物体 | 1.000 |
+| `vogue-moving-home-v1.json` | 10 | 身份、环境、物体 | 1.000 |
+
+这些分数只代表 4 段视频中的 27 张人工复核帧。未在某个标注中列出的交互、空间关系或身份不会进入该样本的宏平均；结果用于防止基线回退，不能替代更大规模数据集。
 
 ## 输出
 

@@ -41,6 +41,23 @@ def detect_shots(
     ]
 
 
+def split_long_shots(
+    shots: Sequence[Tuple[int, int]],
+    max_shot_seconds: float,
+) -> List[Tuple[int, int]]:
+    if max_shot_seconds <= 0:
+        raise ValueError("max_shot_seconds must be greater than zero")
+    maximum_ms = int(round(max_shot_seconds * 1000))
+    result = []
+    for start_ms, end_ms in shots:
+        boundary = start_ms
+        while boundary + maximum_ms < end_ms:
+            result.append((boundary, boundary + maximum_ms))
+            boundary += maximum_ms
+        result.append((boundary, end_ms))
+    return result
+
+
 def _confirmed_speakers(data: dict) -> Dict[str, str]:
     return {
         item["face_id"]: item["speaker_label"]
@@ -248,6 +265,7 @@ def analyze_scenes(
     adaptive_threshold: float = 3.0,
     min_content_val: float = 15.0,
     min_shot_seconds: float = 0.5,
+    max_shot_seconds: float = 30.0,
     horizontal_threshold: float = 0.08,
     vertical_threshold: float = 0.08,
     near_threshold: float = 0.35,
@@ -278,6 +296,7 @@ def analyze_scenes(
         shots = [(0, duration_ms)]
     elif shots:
         shots[-1] = (shots[-1][0], duration_ms)
+    shots = split_long_shots(shots, max_shot_seconds)
 
     observations_by_frame: Dict[int, List[dict]] = {}
     for observation in visual["observations"]:
@@ -383,6 +402,7 @@ def analyze_scenes(
                 "adaptive_threshold": adaptive_threshold,
                 "min_content_val": min_content_val,
                 "min_shot_seconds": min_shot_seconds,
+                "max_shot_seconds": max_shot_seconds,
             },
             "keyframe_selector": "best_of_20_50_80_by_sharpness_and_visible_faces_v2",
             "spatial_relations": {

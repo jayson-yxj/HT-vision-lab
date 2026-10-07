@@ -79,6 +79,15 @@ def _retry_delay(headers, message: str, attempt: int) -> float:
     return min(8.0, 0.5 * 2**attempt)
 
 
+def _bounded_retry_delay(headers, message: str, attempt: int, maximum: float) -> float:
+    delay = _retry_delay(headers, message, attempt)
+    if delay > maximum:
+        raise OSError(
+            f"Groq rate limit asks for a {delay:.1f}s wait; rerun later to reuse cached results"
+        )
+    return delay
+
+
 def chat_completion(
     payload: dict,
     timeout: float = 60.0,
@@ -112,7 +121,11 @@ def chat_completion(
         except HTTPError as error:
             message = _error_message(error)
             if error.code == 429 and attempt < 4:
-                time.sleep(_retry_delay(error.headers, message, attempt))
+                try:
+                    delay = _bounded_retry_delay(error.headers, message, attempt, timeout)
+                except OSError as retry_error:
+                    raise OSError(f"Groq API 429: {message}; {retry_error}") from None
+                time.sleep(delay)
                 continue
             hint = (
                 "; this can be an account, project, region or network restriction"

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "context_type": "vision_evaluation_annotations",
+  "sample_id": "english-dark-studio-2speakers-v1",
+  "source": {
+    "video_sha256": "2c509cd55b52cf33ac9b558a9f7be79e388796c9ba38ec02c94454b11e81935a",
+    "duration_ms": 475400
+  },
+  "provenance": {
+    "method": "manual_evidence_review",
+    "reviewed_at": "2026-10-07",
+    "notes": "Both recurring faces and one representative close-up per camera angle were reviewed against the original frames, Face-ID overlays, and time-aligned speech."
+  },
+  "identity_bindings": [
+    {"speaker_label": "A", "face_id": "Face-01"},
+    {"speaker_label": "B", "face_id": "Face-02"}
+  ],
+  "object_vocabulary": ["microphone", "bottle", "paper", "toy", "camera"],
+  "keyframes": [
+    {
+      "keyframe_id": "keyframe-00001",
+      "timestamp_ms": 21000,
+      "environment_category": "indoor_studio",
+      "object_labels": ["microphone", "toy", "camera"]
+    },
+    {
+      "keyframe_id": "keyframe-00002",
+      "timestamp_ms": 50400,
+      "environment_category": "indoor_studio",
+      "object_labels": ["microphone", "bottle", "paper"]
+    }
+  ]
+}

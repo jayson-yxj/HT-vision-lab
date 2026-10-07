@@ -152,7 +152,7 @@ def bind_speakers_to_faces(
     speech_path: Path,
     output_path: Optional[Path] = None,
     timeline_offset_ms: int = 0,
-    min_evidence_ms: int = 1000,
+    min_evidence_ms: int = 3000,
     min_speaker_coverage: float = 0.50,
     min_margin: float = 0.40,
 ) -> dict:

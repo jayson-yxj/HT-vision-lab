@@ -62,7 +62,7 @@ def _parser() -> argparse.ArgumentParser:
         default=0,
         help="Milliseconds added to speech timestamps before matching",
     )
-    binding.add_argument("--min-evidence-ms", type=int, default=1000)
+    binding.add_argument("--min-evidence-ms", type=int, default=3000)
     binding.add_argument("--min-speaker-coverage", type=float, default=0.50)
     binding.add_argument("--min-margin", type=float, default=0.40)
 
@@ -120,6 +120,12 @@ def _parser() -> argparse.ArgumentParser:
     scenes.add_argument("--adaptive-threshold", type=float, default=3.0)
     scenes.add_argument("--min-content-val", type=float, default=15.0)
     scenes.add_argument("--min-shot-seconds", type=float, default=0.5)
+    scenes.add_argument(
+        "--max-shot-seconds",
+        type=float,
+        default=30.0,
+        help="Split long continuous shots so moving-camera scene changes are sampled",
+    )
     scenes.add_argument("--horizontal-threshold", type=float, default=0.08)
     scenes.add_argument("--vertical-threshold", type=float, default=0.08)
     scenes.add_argument("--near-threshold", type=float, default=0.35)
@@ -438,6 +444,7 @@ def main() -> int:
                 adaptive_threshold=args.adaptive_threshold,
                 min_content_val=args.min_content_val,
                 min_shot_seconds=args.min_shot_seconds,
+                max_shot_seconds=args.max_shot_seconds,
                 horizontal_threshold=args.horizontal_threshold,
                 vertical_threshold=args.vertical_threshold,
                 near_threshold=args.near_threshold,
