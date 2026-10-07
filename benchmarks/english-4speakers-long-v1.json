@@ -17,12 +17,17 @@
     {"speaker_label": "C", "face_id": "Face-02"},
     {"speaker_label": "D", "face_id": "Face-03"}
   ],
+  "object_vocabulary": [
+    "chair", "stool", "sofa", "plant", "table", "phone", "logo", "tree",
+    "van", "car", "building"
+  ],
+  "interaction_predicates": ["speaking"],
   "keyframes": [
     {
       "keyframe_id": "keyframe-00001",
       "timestamp_ms": 601,
       "environment_category": "outdoor_public",
-      "object_labels": ["chair", "plant", "table", "phone"],
+      "object_labels": ["chair", "stool", "sofa", "plant", "table", "phone"],
       "interactions": [
         {"subject_ref": "Face-01", "predicate": "speaking", "object_ref": "group"}
       ],
@@ -56,7 +61,7 @@
       "keyframe_id": "keyframe-00004",
       "timestamp_ms": 13214,
       "environment_category": "outdoor_public",
-      "object_labels": ["tree", "van"],
+      "object_labels": ["tree", "van", "car", "building"],
       "interactions": [
         {"subject_ref": "Face-04", "predicate": "speaking", "object_ref": "group"}
       ],
@@ -70,7 +75,7 @@
       "keyframe_id": "keyframe-00010",
       "timestamp_ms": 39041,
       "environment_category": "outdoor_public",
-      "object_labels": ["chair", "plant", "table", "phone"],
+      "object_labels": ["chair", "stool", "sofa", "plant", "table", "phone"],
       "interactions": [
         {"subject_ref": "Face-04", "predicate": "speaking", "object_ref": "group"}
       ],
@@ -129,9 +134,9 @@
     },
     {
       "keyframe_id": "keyframe-00071",
-      "timestamp_ms": 570403,
+      "timestamp_ms": 566999,
       "environment_category": "outdoor_public",
-      "object_labels": ["chair", "plant", "table", "phone"],
+      "object_labels": ["chair", "stool", "sofa", "plant", "table", "phone"],
       "spatial_relations": [
         {"subject_ref": "Face-04", "predicate": "co_visible_with", "object_ref": "Face-02"},
         {"subject_ref": "Face-04", "predicate": "left_of", "object_ref": "Face-02"},

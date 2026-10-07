@@ -9,7 +9,9 @@ import cv2
 import numpy as np
 
 from scripts.scene_semantics import (
+    _is_scene_object,
     _repair_graphic_environment,
+    _visual_reuse_plan,
     analyze_scene_semantics,
     validate_scene_semantics,
 )
@@ -204,8 +206,11 @@ def test_qwen_batches_images_transcript_and_cache() -> None:
         assert not validate_scene_semantics(result)
         assert result["status"] == "complete"
         assert result["statistics"]["semantic_objects"] == 1
-        assert result["statistics"]["interactions"] == 1
+        assert result["statistics"]["interactions"] == 2
         assert result["analyses"][0]["interactions"][0]["epistemic_status"] == "inferred"
+        assert {
+            item["predicate"] for item in result["analyses"][0]["interactions"]
+        } == {"presenting", "speaking"}
         assert len(calls) == 1
         cached = analyze_scene_semantics(scene_path, transport=fake_transport)
         assert len(calls) == 1
@@ -323,9 +328,38 @@ def test_low_confidence_logo_frame_is_classified_as_graphic() -> None:
     }
 
 
+def test_video_overlays_are_not_scene_objects() -> None:
+    title = {"category": "graphic_or_title"}
+    outdoor = {"category": "outdoor_public"}
+    assert _is_scene_object({"label": "logo"}, title)
+    assert not _is_scene_object({"label": "logo"}, outdoor)
+    assert not _is_scene_object({"label": "subtitle"}, title)
+    assert not _is_scene_object({"label": "text"}, title)
+
+
+def test_spatial_histograms_reject_matching_colors_in_different_layouts() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        scene_path = _write_fixture(root)
+        for index, reverse in ((1, False), (2, True)):
+            frame = np.zeros((80, 120, 3), dtype=np.uint8)
+            left, right = ((255, 255, 255), (0, 0, 0))
+            if reverse:
+                left, right = right, left
+            frame[:, :60] = left
+            frame[:, 60:] = right
+            cv2.imwrite(str(root / "keyframes" / f"keyframe-0000{index}.jpg"), frame)
+        scene = json.loads(scene_path.read_text(encoding="utf-8"))
+        representatives, assignments = _visual_reuse_plan(scene_path, scene, 0.45)
+        assert len(representatives) == 2
+        assert assignments["keyframe-00002"]["source_keyframe_id"] == "keyframe-00002"
+
+
 if __name__ == "__main__":
     test_qwen_batches_images_transcript_and_cache()
     test_missing_batched_keyframe_falls_back_to_single_images()
     test_similar_frames_reuse_model_environment_without_copying_interactions()
     test_low_confidence_logo_frame_is_classified_as_graphic()
+    test_video_overlays_are_not_scene_objects()
+    test_spatial_histograms_reject_matching_colors_in_different_layouts()
     print("PASS: Qwen scene semantics image batching, transcript evidence and cache")

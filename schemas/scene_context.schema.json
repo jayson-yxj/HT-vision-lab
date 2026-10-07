@@ -53,7 +53,12 @@
             "min_shot_seconds": {"type": "number", "exclusiveMinimum": 0}
           }
         },
-        "keyframe_selector": {"const": "best_of_20_50_80_by_sharpness_and_visible_faces_v1"},
+        "keyframe_selector": {
+          "enum": [
+            "best_of_20_50_80_by_sharpness_and_visible_faces_v1",
+            "best_of_20_50_80_by_sharpness_and_visible_faces_v2"
+          ]
+        },
         "spatial_relations": {
           "type": "object",
           "additionalProperties": false,

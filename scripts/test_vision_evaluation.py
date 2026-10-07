@@ -21,6 +21,8 @@ def test_manual_annotations_score_each_visual_dimension() -> None:
             {"speaker_label": "A", "face_id": "Face-01"},
             {"speaker_label": "B", "face_id": "Face-02"},
         ],
+        "object_vocabulary": ["chair", "table"],
+        "interaction_predicates": ["speaking"],
         "keyframes": [
             {
                 "keyframe_id": "keyframe-00001",
@@ -95,10 +97,10 @@ def test_manual_annotations_score_each_visual_dimension() -> None:
     metrics = result["metrics"]
     assert metrics["identity_binding"]["accuracy"] == 0.5
     assert metrics["environment"]["accuracy"] == 0.5
-    assert metrics["objects"]["f1"] == 0.5
+    assert metrics["objects"]["f1"] == 0.666667
     assert metrics["interactions"]["f1"] == 0.666667
     assert metrics["spatial_relations"]["f1"] == 0.666667
-    assert result["summary"]["macro_score"] == 0.566667
+    assert result["summary"]["macro_score"] == 0.6
 
 
 def test_omitted_dimensions_are_not_scored() -> None:

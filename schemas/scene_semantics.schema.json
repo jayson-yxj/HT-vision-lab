@@ -48,7 +48,7 @@
       "properties": {
         "name": {"const": "groq"},
         "model": {"type": "string", "minLength": 1},
-        "prompt_version": {"const": "scene-semantics-qwen3.8-v2"},
+        "prompt_version": {"enum": ["scene-semantics-qwen3.8-v2", "scene-semantics-qwen3.8-v3"]},
         "batch_size": {"type": "integer", "minimum": 1, "maximum": 3},
         "visual_reuse_threshold": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
         "reuse_algorithm": {"type": ["string", "null"]}

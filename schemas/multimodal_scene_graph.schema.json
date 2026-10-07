@@ -50,7 +50,12 @@
           "additionalProperties": false,
           "required": ["algorithm", "similarity_threshold", "description_weight", "object_weight", "person_weight"],
           "properties": {
-            "algorithm": {"const": "adjacent_semantic_similarity_v1"},
+            "algorithm": {
+              "enum": [
+                "adjacent_semantic_similarity_v1",
+                "adjacent_semantic_similarity_with_view_bridging_v2"
+              ]
+            },
             "similarity_threshold": {"type": "number", "minimum": 0, "maximum": 1},
             "description_weight": {"const": 0.55},
             "object_weight": {"const": 0.3},

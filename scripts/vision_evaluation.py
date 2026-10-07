@@ -100,6 +100,25 @@ def validate_evaluation_annotations(data: dict) -> list[str]:
         speakers.add(speaker)
         faces.add(face)
 
+    object_vocabulary = data.get("object_vocabulary")
+    if object_vocabulary is not None:
+        if not isinstance(object_vocabulary, list) or any(
+            not isinstance(item, str) or not item.strip() for item in object_vocabulary
+        ):
+            errors.append("object_vocabulary must contain non-empty strings")
+            object_vocabulary = []
+        elif len({_label(item) for item in object_vocabulary}) != len(object_vocabulary):
+            errors.append("object_vocabulary contains duplicate labels")
+    interaction_predicates = data.get("interaction_predicates")
+    if interaction_predicates is not None:
+        if not isinstance(interaction_predicates, list) or any(
+            item not in INTERACTION_PREDICATES for item in interaction_predicates
+        ):
+            errors.append("interaction_predicates contains an invalid predicate")
+            interaction_predicates = []
+        elif len(set(interaction_predicates)) != len(interaction_predicates):
+            errors.append("interaction_predicates contains duplicates")
+
     keyframes = data.get("keyframes")
     if not isinstance(keyframes, list) or not keyframes:
         errors.append("keyframes must be a non-empty array")
@@ -134,6 +153,10 @@ def validate_evaluation_annotations(data: dict) -> list[str]:
                 errors.append(f"{keyframe_id} has invalid object labels")
             elif len({_label(item) for item in labels}) != len(labels):
                 errors.append(f"{keyframe_id} has duplicate object labels")
+            elif object_vocabulary is not None and not {
+                _label(item) for item in labels
+            }.issubset({_label(item) for item in object_vocabulary}):
+                errors.append(f"{keyframe_id} contains an object outside the vocabulary")
         for field, predicates in (
             ("interactions", INTERACTION_PREDICATES),
             ("spatial_relations", SPATIAL_PREDICATES),
@@ -156,6 +179,14 @@ def validate_evaluation_annotations(data: dict) -> list[str]:
                     errors.append(f"{keyframe_id}.{field}[{relation_index}] has no subject")
                 if predicate not in predicates:
                     errors.append(f"{keyframe_id}.{field}[{relation_index}] has an invalid predicate")
+                if (
+                    field == "interactions"
+                    and interaction_predicates is not None
+                    and predicate not in interaction_predicates
+                ):
+                    errors.append(
+                        f"{keyframe_id}.{field}[{relation_index}] is outside the evaluation predicates"
+                    )
                 if object_ref is not None and not isinstance(object_ref, str):
                     errors.append(f"{keyframe_id}.{field}[{relation_index}] has an invalid object")
                 normalized = _relation(str(subject), str(predicate), object_ref)
@@ -275,12 +306,24 @@ def score_vision_predictions(
     expected_objects, predicted_objects = {}, {}
     expected_interactions, predicted_interactions = {}, {}
     expected_spatial, predicted_spatial = {}, {}
+    object_vocabulary = (
+        {_label(item) for item in annotations["object_vocabulary"]}
+        if "object_vocabulary" in annotations
+        else None
+    )
+    interaction_predicates = (
+        set(annotations["interaction_predicates"])
+        if "interaction_predicates" in annotations
+        else None
+    )
     for keyframe_id, annotated in annotated_frames.items():
         semantic = semantic_frames.get(keyframe_id, {})
         if "object_labels" in annotated:
             expected_objects[keyframe_id] = {_label(item) for item in annotated["object_labels"]}
             predicted_objects[keyframe_id] = {
-                _label(item["label"]) for item in semantic.get("objects", [])
+                _label(item["label"])
+                for item in semantic.get("objects", [])
+                if object_vocabulary is None or _label(item["label"]) in object_vocabulary
             }
         if "interactions" in annotated:
             expected_interactions[keyframe_id] = {
@@ -290,6 +333,7 @@ def score_vision_predictions(
             predicted_interactions[keyframe_id] = {
                 _relation(item["subject_ref"], item["predicate"], item.get("object_ref"))
                 for item in semantic.get("interactions", [])
+                if interaction_predicates is None or item["predicate"] in interaction_predicates
             }
 
     person_states = {item["person_state_id"]: item for item in scene["person_states"]}
@@ -330,6 +374,12 @@ def score_vision_predictions(
             expected_spatial, predicted_spatial, _serialize_relation
         ),
     }
+    metrics["objects"]["vocabulary"] = (
+        sorted(object_vocabulary) if object_vocabulary is not None else None
+    )
+    metrics["interactions"]["evaluated_predicates"] = (
+        sorted(interaction_predicates) if interaction_predicates is not None else None
+    )
     scores = []
     if identity_total:
         scores.append(metrics["identity_binding"]["accuracy"])

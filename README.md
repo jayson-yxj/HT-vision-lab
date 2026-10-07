@@ -162,7 +162,7 @@ bash setup-asd.sh
 
 命令优先读取 `GROQ_API_KEY`，其次读取本项目通过 `./lab login-groq` 保存的密钥，最后兼容已有的 `~/.config/ht-voice-lab/groq.key`。默认每次发送两张关键帧，以适配 Groq 当前的输入速率限制；批量响应缺少关键帧时会自动改为逐张重试。成功响应缓存在 `semantic_cache/`，网络中断后再次运行即可从未完成处继续。
 
-重复机位较多的长视频可使用 `--visual-reuse-threshold 0.45`：系统裁掉字幕区后比较关键帧的 HSV 颜色分布，只把每组代表帧发送给 Qwen；相似镜头复用代表帧的环境和物体结果，置信度按视觉相似度折减，人物发言关系则从该镜头自己的纠正转写重新建立。每条结果记录 `semantic_source`、`source_keyframe_id` 和 `visual_similarity`，不会把复用结果伪装成独立模型调用。短片或镜头差异较大的视频可以不启用。
+重复机位较多的长视频可使用 `--visual-reuse-threshold 0.45`：系统裁掉字幕区后同时比较整帧和 3×3 分区的 HSV 颜色分布，只把每组代表帧发送给 Qwen；这可以区分颜色接近但画面布局不同的户外镜头。相似镜头复用代表帧的环境和物体结果，置信度按视觉相似度折减，人物发言关系则从该镜头自己的纠正转写重新建立。每条结果记录 `semantic_source`、`source_keyframe_id` 和 `visual_similarity`，不会把复用结果伪装成独立模型调用。短片或镜头差异较大的视频可以不启用。
 
 `scene_semantics.json` 中的环境、物体和交互全部标为 `inferred`。系统只允许交互引用当前关键帧可见的 Face-ID，并过滤“对物体 speaking/listening”等不合理关系；它不会从外貌推断真实身份、性格、情绪、意图、视线或头部朝向。
 
@@ -176,7 +176,7 @@ bash setup-asd.sh
 ./lab validate-scene-graph results/example/multimodal_scene_graph.json
 ```
 
-`--participant-context` 可选。提供后，图会用同一份 `visual_tracks.json` 的哈希校验两条处理链确实属于同一段视频，并把已有姓名和 participant ID 放入参与者节点。只有 `confirmed` 的 A/B/C/D—Face-ID 绑定会合并为同一个参与者；有争议或未绑定的 Face-ID 作为 `visual_identity` 证据保留，不计入参与者人数，并以 `identity_candidate` 边记录候选及置信度。场景合并完全在本地执行，默认综合环境描述、物体和人物的相似度，不会增加云 API 调用。
+`--participant-context` 可选。提供后，图会用同一份 `visual_tracks.json` 的哈希校验两条处理链确实属于同一段视频，并把已有姓名和 participant ID 放入参与者节点。只有 `confirmed` 的 A/B/C/D—Face-ID 绑定会合并为同一个参与者；有争议或未绑定的 Face-ID 作为 `visual_identity` 证据保留，不计入参与者人数，并以 `identity_candidate` 边记录候选及置信度。场景合并完全在本地执行，默认综合环境描述、物体和人物的相似度，并用重复出现的代表机位吸收短暂近景切换，避免把同一访谈按摄像机角度拆成多个场景。
 
 打开交互式场景图：
 
@@ -219,7 +219,9 @@ bash setup-asd.sh
 
 默认从 `scene_context.json` 的来源字段读取 `visual_tracks.json`，并读取同目录的 `scene_semantics.json`；也可通过 `--visual-json` 和 `--semantics-json` 显式指定。输出 `vision_evaluation_report.json`，其中人物绑定和环境使用准确率，物体、交互和二维空间关系使用 Precision、Recall 与 F1，最终宏平均只计算实际有人工标签的维度。
 
-标注文件中省略某个字段表示该维度不确定且不计分；显式写入空数组表示人工确认该帧没有对应对象。物体数组应列出约定范围内全部显著物体，交互和空间关系数组应列出全部已确认关系。评测器会核对视频哈希、时长、关键帧时间、会话 ID 和上游文件哈希，避免把不同运行或不同视频的结果混在一起。
+标注文件中省略某个字段表示该维度不确定且不计分；显式写入空数组表示人工确认该帧没有对应对象。`object_vocabulary` 和 `interaction_predicates` 明确限定本次人工复核的范围，避免把同义家具、字幕水印或尚未标注的交互当成模型错误。物体数组应列出范围内全部显著物体，交互和空间关系数组应列出全部已确认关系。评测器会核对视频哈希、时长、关键帧时间、会话 ID 和上游文件哈希，避免把不同运行或不同视频的结果混在一起。
+
+当前四人长视频基线为：人物绑定准确率 1.000、环境准确率 1.000、物体 F1 0.836、发言交互 F1 1.000、二维空间关系 F1 1.000，五项宏平均 0.967。该结果只代表一个视频中的九张人工复核帧，不能替代更多场景的泛化测试。
 
 ## 输出
 

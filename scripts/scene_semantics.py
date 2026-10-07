@@ -16,7 +16,7 @@ from .models import file_sha256
 from .scene_context import validate_scene_context
 
 
-PROMPT_VERSION = "scene-semantics-qwen3.8-v2"
+PROMPT_VERSION = "scene-semantics-qwen3.8-v3"
 ENVIRONMENT_CATEGORIES = (
     "indoor_meeting",
     "indoor_office",
@@ -47,6 +47,7 @@ INTERACTION_PREDICATES = (
 
 SYSTEM_PROMPT = """你负责分析多人会话的关键帧。输入图片已经用 Face-ID 标出人物，文字元数据提供已确认的说话人标签、二维位置、关系和本镜头转写。
 严格区分可观察事实和推断：不要根据外貌识别真实身份，不推断性格、情绪、意图、视线或头部朝向，不把同框自动解释为交流。环境和物体只描述图中可见内容；人物交互必须有直接画面证据，或由画面与转写共同支持，证据不足就省略。
+环境分类以人物实际所在空间为准：有屋檐但向天空、庭院或室外建筑完全开放的露台仍属于 outdoor_public；只有人物处于四周封闭的办公空间才属于 indoor_office。黑色或纯色背景上的节目名称、字幕、台标或 Logo 属于 graphic_or_title。物体应覆盖显著家具、手持电子设备、车辆和背景建筑；图卡中可见的 Logo 也要记录，不能把相似场景中曾出现的物体补到当前画面。
 每张输入关键帧必须返回且只返回一项分析。subject_ref 必须使用该帧可见的 Face-ID。object_ref 只能是可见 Face-ID、object:<物体英文短标签>、group、scene 或 null。仅凭同框不能把 speaking 或 listening 指向某个 Face-ID；没有明确称呼或可见交互对象时使用 group 或 null。环境类别必须使用给定枚举。描述保持简短。"""
 
 
@@ -260,11 +261,36 @@ def _visual_reuse_plan(
             [hsv], [0, 1, 2], None, [16, 8, 8], [0, 180, 0, 256, 0, 256]
         )
         cv2.normalize(histogram, histogram)
+        spatial_histograms = []
+        for top, bottom in ((0, 30), (30, 60), (60, 90)):
+            for left, right in ((0, 53), (53, 106), (106, 160)):
+                spatial = cv2.calcHist(
+                    [hsv[top:bottom, left:right]],
+                    [0, 1, 2],
+                    None,
+                    [12, 6, 6],
+                    [0, 180, 0, 256, 0, 256],
+                )
+                spatial_histograms.append(cv2.normalize(spatial, spatial))
         nearest = min(
             (
                 (
-                    cv2.compareHist(
-                        histogram, cluster["histogram"], cv2.HISTCMP_BHATTACHARYYA
+                    max(
+                        cv2.compareHist(
+                            histogram,
+                            cluster["histogram"],
+                            cv2.HISTCMP_BHATTACHARYYA,
+                        ),
+                        sum(
+                            cv2.compareHist(
+                                left, right, cv2.HISTCMP_BHATTACHARYYA
+                            )
+                            for left, right in zip(
+                                spatial_histograms,
+                                cluster["spatial_histograms"],
+                            )
+                        )
+                        / len(spatial_histograms),
                     ),
                     cluster,
                 )
@@ -274,7 +300,11 @@ def _visual_reuse_plan(
             key=lambda item: item[0],
         )
         if nearest[1] is None or nearest[0] > max_distance:
-            cluster = {"histogram": histogram, "representative": keyframe}
+            cluster = {
+                "histogram": histogram,
+                "spatial_histograms": spatial_histograms,
+                "representative": keyframe,
+            }
             clusters.append(cluster)
             distance = 0.0
         else:
@@ -344,6 +374,19 @@ def _expand_visual_reuse(
                 ),
             }
             semantic_source = "visual_reuse"
+        transcript_interactions = _transcript_interactions(
+            _frame_metadata(scene, keyframe, speech)
+        )
+        existing = {
+            (item["subject_ref"], item["predicate"], item.get("object_ref"))
+            for item in analysis["interactions"]
+        }
+        analysis["interactions"].extend(
+            item
+            for item in transcript_interactions
+            if (item["subject_ref"], item["predicate"], item.get("object_ref"))
+            not in existing
+        )
         analysis["analysis_id"] = f"scene-analysis-{len(expanded) + 1:06d}"
         analysis["semantic_source"] = semantic_source
         analysis["source_keyframe_id"] = source["keyframe_id"]
@@ -559,6 +602,13 @@ def _repair_graphic_environment(environment: dict, objects: Sequence[dict]) -> d
     return repaired
 
 
+def _is_scene_object(value: dict, environment: dict) -> bool:
+    label = str(value.get("label", "")).strip().lower()
+    if label in {"subtitle", "text"}:
+        return False
+    return label != "logo" or environment.get("category") == "graphic_or_title"
+
+
 def _normalize_analyses(
     raw: Sequence[dict],
     scene: dict,
@@ -574,6 +624,8 @@ def _normalize_analyses(
         environment = _repair_graphic_environment(item["environment"], item["objects"])
         objects = []
         for value in item["objects"]:
+            if not _is_scene_object(value, environment):
+                continue
             object_count += 1
             objects.append(
                 {
@@ -818,7 +870,7 @@ def analyze_scene_semantics(
             "batch_size": batch_size,
             "visual_reuse_threshold": visual_reuse_threshold,
             "reuse_algorithm": (
-                "cropped_hsv_histogram_bhattacharyya_v1"
+                "cropped_spatial_hsv_histogram_bhattacharyya_v2"
                 if visual_reuse_threshold is not None
                 else None
             ),

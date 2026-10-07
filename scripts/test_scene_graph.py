@@ -4,7 +4,11 @@ import json
 import tempfile
 from pathlib import Path
 
-from scripts.scene_graph import project_scene_graph, validate_scene_graph
+from scripts.scene_graph import (
+    _merge_recurring_views,
+    project_scene_graph,
+    validate_scene_graph,
+)
 from scripts.scene_semantics import analyze_scene_semantics
 from scripts.test_scene_semantics import _write_fixture
 
@@ -84,14 +88,14 @@ def test_adjacent_semantics_merge_into_evidence_graph() -> None:
         assert not validate_scene_graph(graph)
         assert graph["statistics"] == {
             "nodes": 4,
-            "edges": 4,
+            "edges": 5,
             "persons": 1,
             "visual_identities": 1,
             "scenes": 1,
             "objects": 1,
-            "interactions": 1,
+            "interactions": 2,
             "observed_edges": 2,
-            "inferred_edges": 2,
+            "inferred_edges": 3,
         }
         scene = next(item for item in graph["nodes"] if item["type"] == "scene")
         assert scene["attributes"]["shot_ids"] == ["shot-00001", "shot-00002"]
@@ -126,7 +130,37 @@ def test_incomplete_semantics_are_rejected() -> None:
             raise AssertionError("partial scene semantics were accepted")
 
 
+def test_brief_camera_angle_is_bridged_by_recurring_view() -> None:
+    def unit(keyframe_id: str, source: str, category: str, start_ms: int) -> dict:
+        return {
+            "analysis": {
+                "keyframe_id": keyframe_id,
+                "source_keyframe_id": source,
+                "environment": {"category": category},
+            },
+            "shot": {"start_ms": start_ms, "end_ms": start_ms + 1000},
+        }
+
+    recurring = _merge_recurring_views(
+        [
+            [unit("keyframe-00001", "keyframe-00001", "outdoor_public", 0)],
+            [unit("keyframe-00002", "keyframe-00002", "outdoor_public", 1000)],
+            [unit("keyframe-00003", "keyframe-00001", "outdoor_public", 2000)],
+        ]
+    )
+    assert len(recurring) == 1
+    changed_location = _merge_recurring_views(
+        [
+            [unit("keyframe-00001", "keyframe-00001", "outdoor_public", 0)],
+            [unit("keyframe-00002", "keyframe-00002", "graphic_or_title", 1000)],
+            [unit("keyframe-00003", "keyframe-00001", "outdoor_public", 2000)],
+        ]
+    )
+    assert len(changed_location) == 3
+
+
 if __name__ == "__main__":
     test_adjacent_semantics_merge_into_evidence_graph()
     test_incomplete_semantics_are_rejected()
+    test_brief_camera_angle_is_bridged_by_recurring_view()
     print("PASS: stable scene merging and multimodal graph projection")

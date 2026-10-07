@@ -8,7 +8,12 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from scripts.scene_context import analyze_scenes, build_spatial_relations, validate_scene_context
+from scripts.scene_context import (
+    _select_keyframe,
+    analyze_scenes,
+    build_spatial_relations,
+    validate_scene_context,
+)
 
 
 def _state(identifier: str, center, box) -> dict:
@@ -28,6 +33,33 @@ def test_spatial_relations_are_evidence_grounded() -> None:
     assert [item["predicate"] for item in relations] == ["co_visible_with", "left_of"]
     assert relations[1]["subject_state_id"] == "left"
     assert relations[1]["object_state_id"] == "right"
+
+
+def test_keyframe_selection_prioritizes_visible_people() -> None:
+    class Capture:
+        def __init__(self):
+            self.index = 0
+
+        def set(self, _property, value):
+            self.index = int(value)
+
+        def read(self):
+            if self.index == 1:
+                return True, np.full((90, 160, 3), 80, dtype=np.uint8)
+            noisy = np.indices((90, 160)).sum(axis=0) % 2 * 255
+            return True, np.repeat(noisy[:, :, None], 3, axis=2).astype(np.uint8)
+
+    observations = {
+        1: [
+            {"bbox_normalized": [0.1, 0.2, 0.2, 0.3]},
+            {"bbox_normalized": [0.6, 0.2, 0.2, 0.3]},
+        ],
+        2: [{"bbox_normalized": [0.1, 0.2, 0.2, 0.3]}],
+    }
+    selected, _frame, _sharpness_value, _score = _select_keyframe(
+        Capture(), [1, 2], observations
+    )
+    assert selected == 1
 
 
 def _write_video(path: Path) -> None:
@@ -102,5 +134,6 @@ def test_real_pipeline_writes_shots_keyframes_and_positions() -> None:
 
 if __name__ == "__main__":
     test_spatial_relations_are_evidence_grounded()
+    test_keyframe_selection_prioritizes_visible_people()
     test_real_pipeline_writes_shots_keyframes_and_positions()
     print("PASS: scene context shots, keyframes and spatial relations")

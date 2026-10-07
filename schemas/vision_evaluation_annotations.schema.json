@@ -40,6 +40,18 @@
         }
       }
     },
+    "object_vocabulary": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "interaction_predicates": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": ["speaking", "listening", "presenting", "showing", "holding", "using", "pointing_to", "sitting_with", "standing_with", "touching", "other"]
+      }
+    },
     "keyframes": {
       "type": "array",
       "minItems": 1,

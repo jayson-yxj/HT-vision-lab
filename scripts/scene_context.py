@@ -117,7 +117,10 @@ def _select_keyframe(
     face_areas = _normalized([item["face_area"] for item in rows])
     for item, sharp, count, area in zip(rows, sharpness, face_counts, face_areas):
         item["score"] = 0.45 * sharp + 0.35 * count + 0.20 * area
-    selected = max(rows, key=lambda item: (item["score"], -item["frame_index"]))
+    selected = max(
+        rows,
+        key=lambda item: (item["face_count"], item["score"], -item["frame_index"]),
+    )
     return (
         selected["frame_index"],
         selected["frame"],
@@ -381,7 +384,7 @@ def analyze_scenes(
                 "min_content_val": min_content_val,
                 "min_shot_seconds": min_shot_seconds,
             },
-            "keyframe_selector": "best_of_20_50_80_by_sharpness_and_visible_faces_v1",
+            "keyframe_selector": "best_of_20_50_80_by_sharpness_and_visible_faces_v2",
             "spatial_relations": {
                 "algorithm": "normalized_face_box_geometry_v1",
                 "horizontal_threshold": horizontal_threshold,

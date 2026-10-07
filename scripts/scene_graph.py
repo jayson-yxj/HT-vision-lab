@@ -11,10 +11,12 @@ from .scene_context import validate_scene_context
 from .scene_semantics import validate_scene_semantics
 
 
-MERGER_ALGORITHM = "adjacent_semantic_similarity_v1"
+MERGER_ALGORITHM = "adjacent_semantic_similarity_with_view_bridging_v2"
 DESCRIPTION_WEIGHT = 0.55
 OBJECT_WEIGHT = 0.30
 PERSON_WEIGHT = 0.15
+MAX_BRIDGED_UNITS = 2
+MAX_BRIDGED_DURATION_MS = 30_000
 NODE_TYPES = {"person", "visual_identity", "scene", "object"}
 STRUCTURAL_PREDICATES = {"present_in", "contains", "followed_by", "identity_candidate"}
 
@@ -78,6 +80,45 @@ def _group_units(units: Sequence[dict], threshold: float) -> List[List[dict]]:
             groups.append([unit])
         else:
             groups[-1].append(unit)
+    return _merge_recurring_views(groups)
+
+
+def _merge_recurring_views(groups: List[List[dict]]) -> List[List[dict]]:
+    groups = [list(group) for group in groups]
+    changed = True
+    while changed:
+        changed = False
+        for index in range(1, len(groups) - 1):
+            left, middle, right = groups[index - 1 : index + 2]
+            categories = {
+                group[0]["analysis"]["environment"]["category"]
+                for group in (left, middle, right)
+            }
+            middle_duration = sum(
+                unit["shot"]["end_ms"] - unit["shot"]["start_ms"]
+                for unit in middle
+            )
+            left_sources = {
+                unit["analysis"].get(
+                    "source_keyframe_id", unit["analysis"]["keyframe_id"]
+                )
+                for unit in left
+            }
+            right_sources = {
+                unit["analysis"].get(
+                    "source_keyframe_id", unit["analysis"]["keyframe_id"]
+                )
+                for unit in right
+            }
+            if (
+                len(categories) == 1
+                and len(middle) <= MAX_BRIDGED_UNITS
+                and middle_duration <= MAX_BRIDGED_DURATION_MS
+                and left_sources & right_sources
+            ):
+                groups[index - 1 : index + 2] = [left + middle + right]
+                changed = True
+                break
     return groups
 
 
