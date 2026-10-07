@@ -1,0 +1,162 @@
+{
+  "schema_version": 1,
+  "context_type": "vision_evaluation_annotations",
+  "sample_id": "english-4speakers-long-v1",
+  "source": {
+    "video_sha256": "9992e2a6206aaad282b1ffcaca0eaee98ce7b1af3d11c6a6d64fda001f7329eb",
+    "duration_ms": 581147
+  },
+  "provenance": {
+    "method": "manual_evidence_review",
+    "reviewed_at": "2026-10-07",
+    "notes": "Nine representative frames were reviewed against the rendered Face-ID overlay, subtitles, time-aligned transcript, and previously confirmed speaker-face mapping. Object lists contain salient visible object categories. Omitted fields are uncertain and are not scored."
+  },
+  "identity_bindings": [
+    {"speaker_label": "A", "face_id": "Face-01"},
+    {"speaker_label": "B", "face_id": "Face-04"},
+    {"speaker_label": "C", "face_id": "Face-02"},
+    {"speaker_label": "D", "face_id": "Face-03"}
+  ],
+  "keyframes": [
+    {
+      "keyframe_id": "keyframe-00001",
+      "timestamp_ms": 601,
+      "environment_category": "outdoor_public",
+      "object_labels": ["chair", "plant", "table", "phone"],
+      "interactions": [
+        {"subject_ref": "Face-01", "predicate": "speaking", "object_ref": "group"}
+      ],
+      "spatial_relations": [
+        {"subject_ref": "Face-04", "predicate": "co_visible_with", "object_ref": "Face-02"},
+        {"subject_ref": "Face-04", "predicate": "left_of", "object_ref": "Face-02"},
+        {"subject_ref": "Face-04", "predicate": "visually_close_to", "object_ref": "Face-02"},
+        {"subject_ref": "Face-04", "predicate": "co_visible_with", "object_ref": "Face-01"},
+        {"subject_ref": "Face-04", "predicate": "left_of", "object_ref": "Face-01"},
+        {"subject_ref": "Face-04", "predicate": "co_visible_with", "object_ref": "Face-03"},
+        {"subject_ref": "Face-04", "predicate": "left_of", "object_ref": "Face-03"},
+        {"subject_ref": "Face-02", "predicate": "co_visible_with", "object_ref": "Face-01"},
+        {"subject_ref": "Face-02", "predicate": "left_of", "object_ref": "Face-01"},
+        {"subject_ref": "Face-02", "predicate": "visually_close_to", "object_ref": "Face-01"},
+        {"subject_ref": "Face-02", "predicate": "co_visible_with", "object_ref": "Face-03"},
+        {"subject_ref": "Face-02", "predicate": "left_of", "object_ref": "Face-03"},
+        {"subject_ref": "Face-01", "predicate": "co_visible_with", "object_ref": "Face-03"},
+        {"subject_ref": "Face-01", "predicate": "left_of", "object_ref": "Face-03"},
+        {"subject_ref": "Face-01", "predicate": "visually_close_to", "object_ref": "Face-03"}
+      ]
+    },
+    {
+      "keyframe_id": "keyframe-00003",
+      "timestamp_ms": 10544,
+      "environment_category": "graphic_or_title",
+      "object_labels": ["logo"],
+      "interactions": [],
+      "spatial_relations": []
+    },
+    {
+      "keyframe_id": "keyframe-00004",
+      "timestamp_ms": 13214,
+      "environment_category": "outdoor_public",
+      "object_labels": ["tree", "van"],
+      "interactions": [
+        {"subject_ref": "Face-04", "predicate": "speaking", "object_ref": "group"}
+      ],
+      "spatial_relations": [
+        {"subject_ref": "Face-02", "predicate": "co_visible_with", "object_ref": "Face-04"},
+        {"subject_ref": "Face-02", "predicate": "left_of", "object_ref": "Face-04"},
+        {"subject_ref": "Face-02", "predicate": "visually_close_to", "object_ref": "Face-04"}
+      ]
+    },
+    {
+      "keyframe_id": "keyframe-00010",
+      "timestamp_ms": 39041,
+      "environment_category": "outdoor_public",
+      "object_labels": ["chair", "plant", "table", "phone"],
+      "interactions": [
+        {"subject_ref": "Face-04", "predicate": "speaking", "object_ref": "group"}
+      ],
+      "spatial_relations": [
+        {"subject_ref": "Face-04", "predicate": "co_visible_with", "object_ref": "Face-02"},
+        {"subject_ref": "Face-04", "predicate": "left_of", "object_ref": "Face-02"},
+        {"subject_ref": "Face-04", "predicate": "visually_close_to", "object_ref": "Face-02"},
+        {"subject_ref": "Face-04", "predicate": "co_visible_with", "object_ref": "Face-01"},
+        {"subject_ref": "Face-04", "predicate": "left_of", "object_ref": "Face-01"},
+        {"subject_ref": "Face-04", "predicate": "co_visible_with", "object_ref": "Face-03"},
+        {"subject_ref": "Face-04", "predicate": "left_of", "object_ref": "Face-03"},
+        {"subject_ref": "Face-02", "predicate": "co_visible_with", "object_ref": "Face-01"},
+        {"subject_ref": "Face-02", "predicate": "left_of", "object_ref": "Face-01"},
+        {"subject_ref": "Face-02", "predicate": "visually_close_to", "object_ref": "Face-01"},
+        {"subject_ref": "Face-02", "predicate": "co_visible_with", "object_ref": "Face-03"},
+        {"subject_ref": "Face-02", "predicate": "left_of", "object_ref": "Face-03"},
+        {"subject_ref": "Face-01", "predicate": "co_visible_with", "object_ref": "Face-03"},
+        {"subject_ref": "Face-01", "predicate": "left_of", "object_ref": "Face-03"},
+        {"subject_ref": "Face-01", "predicate": "visually_close_to", "object_ref": "Face-03"}
+      ]
+    },
+    {
+      "keyframe_id": "keyframe-00011",
+      "timestamp_ms": 46449,
+      "environment_category": "outdoor_public",
+      "object_labels": ["chair", "plant", "table"],
+      "interactions": [
+        {"subject_ref": "Face-04", "predicate": "speaking", "object_ref": "group"}
+      ],
+      "spatial_relations": [
+        {"subject_ref": "Face-04", "predicate": "co_visible_with", "object_ref": "Face-02"},
+        {"subject_ref": "Face-04", "predicate": "left_of", "object_ref": "Face-02"}
+      ]
+    },
+    {
+      "keyframe_id": "keyframe-00065",
+      "timestamp_ms": 541372,
+      "environment_category": "outdoor_public",
+      "object_labels": ["tree", "chair", "table", "building"],
+      "interactions": [
+        {"subject_ref": "Face-02", "predicate": "speaking", "object_ref": "group"}
+      ],
+      "spatial_relations": [
+        {"subject_ref": "Face-02", "predicate": "co_visible_with", "object_ref": "Face-04"},
+        {"subject_ref": "Face-02", "predicate": "left_of", "object_ref": "Face-04"},
+        {"subject_ref": "Face-02", "predicate": "visually_close_to", "object_ref": "Face-04"}
+      ]
+    },
+    {
+      "keyframe_id": "keyframe-00070",
+      "timestamp_ms": 562962,
+      "environment_category": "graphic_or_title",
+      "object_labels": ["logo"],
+      "interactions": [],
+      "spatial_relations": []
+    },
+    {
+      "keyframe_id": "keyframe-00071",
+      "timestamp_ms": 570403,
+      "environment_category": "outdoor_public",
+      "object_labels": ["chair", "plant", "table", "phone"],
+      "spatial_relations": [
+        {"subject_ref": "Face-04", "predicate": "co_visible_with", "object_ref": "Face-02"},
+        {"subject_ref": "Face-04", "predicate": "left_of", "object_ref": "Face-02"},
+        {"subject_ref": "Face-04", "predicate": "visually_close_to", "object_ref": "Face-02"},
+        {"subject_ref": "Face-04", "predicate": "co_visible_with", "object_ref": "Face-01"},
+        {"subject_ref": "Face-04", "predicate": "left_of", "object_ref": "Face-01"},
+        {"subject_ref": "Face-04", "predicate": "co_visible_with", "object_ref": "Face-03"},
+        {"subject_ref": "Face-04", "predicate": "left_of", "object_ref": "Face-03"},
+        {"subject_ref": "Face-02", "predicate": "co_visible_with", "object_ref": "Face-01"},
+        {"subject_ref": "Face-02", "predicate": "left_of", "object_ref": "Face-01"},
+        {"subject_ref": "Face-02", "predicate": "visually_close_to", "object_ref": "Face-01"},
+        {"subject_ref": "Face-02", "predicate": "co_visible_with", "object_ref": "Face-03"},
+        {"subject_ref": "Face-02", "predicate": "left_of", "object_ref": "Face-03"},
+        {"subject_ref": "Face-01", "predicate": "co_visible_with", "object_ref": "Face-03"},
+        {"subject_ref": "Face-01", "predicate": "left_of", "object_ref": "Face-03"},
+        {"subject_ref": "Face-01", "predicate": "visually_close_to", "object_ref": "Face-03"}
+      ]
+    },
+    {
+      "keyframe_id": "keyframe-00072",
+      "timestamp_ms": 578678,
+      "environment_category": "graphic_or_title",
+      "object_labels": ["logo"],
+      "interactions": [],
+      "spatial_relations": []
+    }
+  ]
+}

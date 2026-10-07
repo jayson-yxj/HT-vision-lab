@@ -21,6 +21,7 @@
 13. 将语义相近的相邻镜头合并成稳定场景，并投影为人物—场景—物体—交互图；
 14. 将语音侧的话题、观点和意图按人物与话轮时间接入视觉场景图；
 15. 在本地网页中交互查看场景时间轴、关系筛选、证据详情和标注关键帧。
+16. 用人工复核的代表帧评测人物绑定、环境、物体、交互和二维空间关系。
 
 人脸检测、特征与主动说话人模型在本地运行；场景语义分析通过 Groq 云 API 调用 Qwen3.8 27B。项目将本地模型 URL 固定到上游仓库的具体 Git revision，下载后校验文件大小和 SHA-256。YuNet 和 LR-ASD 为 MIT，SFace 为 Apache-2.0；详见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
@@ -206,6 +207,20 @@ bash setup-asd.sh
 
 该步骤只读取版本化 JSON，不导入或调用 `HT-voice-lab` 的代码。系统通过 `multimodal_participant_context.json` 中记录的会话 ID 与 `session_memory.json` 哈希确认两条处理链属于同一场对话；人物 A/B/C/D 直接复用现有人物节点。每个观点按话轮与场景至少 120 毫秒的时间交集建立关系，跨场景的话轮会保留多条带覆盖比例的边，视觉范围以外的话轮仍进入会话图但不伪造场景关联。
 
+## 视觉基线评测
+
+仓库中的 `benchmarks/english-4speakers-long-v1.json` 是首个人工复核样例，覆盖四人绑定、室外访谈、步行过场、片头片尾和黑屏转场。它只保存视频哈希、关键帧 ID 和人工标签，不包含视频或图片。运行：
+
+```bash
+./lab evaluate-vision \
+  benchmarks/english-4speakers-long-v1.json \
+  results/regression-english-full-multimodal/scene_context.json
+```
+
+默认从 `scene_context.json` 的来源字段读取 `visual_tracks.json`，并读取同目录的 `scene_semantics.json`；也可通过 `--visual-json` 和 `--semantics-json` 显式指定。输出 `vision_evaluation_report.json`，其中人物绑定和环境使用准确率，物体、交互和二维空间关系使用 Precision、Recall 与 F1，最终宏平均只计算实际有人工标签的维度。
+
+标注文件中省略某个字段表示该维度不确定且不计分；显式写入空数组表示人工确认该帧没有对应对象。物体数组应列出约定范围内全部显著物体，交互和空间关系数组应列出全部已确认关系。评测器会核对视频哈希、时长、关键帧时间、会话 ID 和上游文件哈希，避免把不同运行或不同视频的结果混在一起。
+
 ## 输出
 
 ```text
@@ -217,6 +232,7 @@ results/example/
 ├── scene_semantics.json
 ├── multimodal_scene_graph.json
 ├── multimodal_conversation_graph.json
+├── vision_evaluation_report.json
 ├── annotated.mp4
 ├── active_speaker.mp4
 ├── semantic_cache/

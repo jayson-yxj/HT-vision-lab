@@ -179,6 +179,16 @@ def _parser() -> argparse.ArgumentParser:
     )
     validate_conversation_graph.add_argument("json_path", type=Path)
 
+    evaluation = commands.add_parser(
+        "evaluate-vision",
+        help="Score visual predictions against manually reviewed annotations",
+    )
+    evaluation.add_argument("annotations_json", type=Path)
+    evaluation.add_argument("scene_json", type=Path)
+    evaluation.add_argument("--visual-json", type=Path)
+    evaluation.add_argument("--semantics-json", type=Path)
+    evaluation.add_argument("--output", type=Path)
+
     visualize_graph = commands.add_parser(
         "visualize-scene-graph", help="Serve the interactive multimodal scene graph"
     )
@@ -568,6 +578,33 @@ def main() -> int:
                     print(f"ERROR: {error}", file=sys.stderr)
                 return 1
             print(f"PASS: {args.json_path}")
+            return 0
+        if args.command == "evaluate-vision":
+            from .vision_evaluation import evaluate_vision
+
+            report = evaluate_vision(
+                args.annotations_json,
+                args.scene_json,
+                visual_path=args.visual_json,
+                semantics_path=args.semantics_json,
+                output_path=args.output,
+            )
+            output = (
+                args.output.expanduser().resolve()
+                if args.output
+                else args.scene_json.expanduser().resolve().parent
+                / "vision_evaluation_report.json"
+            )
+            metrics = report["metrics"]
+            print(f"[done] {output}")
+            print(
+                f"[evaluation] identity={metrics['identity_binding']['accuracy']:.3f}, "
+                f"environment={metrics['environment']['accuracy']:.3f}, "
+                f"objects-f1={metrics['objects']['f1']:.3f}, "
+                f"interactions-f1={metrics['interactions']['f1']:.3f}, "
+                f"spatial-f1={metrics['spatial_relations']['f1']:.3f}, "
+                f"macro={report['summary']['macro_score']:.3f}"
+            )
             return 0
         if args.command in {"visualize-scene-graph", "visualize-conversation-graph"}:
             from .scene_graph_server import serve_scene_graph
