@@ -5,7 +5,14 @@ root="$(cd "$(dirname "$0")" && pwd)"
 cd "$root"
 
 python_bin="python3"
-if [[ "${1:-}" == "active-speaker" || "${1:-}" == "asd-status" ]]; then
+use_asd=false
+for argument in "$@"; do
+  if [[ "$argument" == "--active-speaker" || "$argument" == "--speech-timeline" ]]; then
+    use_asd=true
+    break
+  fi
+done
+if [[ "${1:-}" == "active-speaker" || "${1:-}" == "asd-status" || "$use_asd" == true ]]; then
   if [[ -x .venv-asd/bin/python ]]; then
     python_bin=.venv-asd/bin/python
   fi

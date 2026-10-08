@@ -253,6 +253,29 @@ def _parser() -> argparse.ArgumentParser:
     live.add_argument("--semantic-minimum-interval", type=float, default=0.2)
     live.add_argument("--semantic-queue-size", type=int, default=8)
     live.add_argument("--groq-proxy")
+    live.add_argument(
+        "--active-speaker",
+        action="store_true",
+        help="Run LR-ASD on bounded video chunks and emit person_speaking events",
+    )
+    live.add_argument("--asd-model", choices=("ava", "talkset"), default="talkset")
+    live.add_argument("--asd-device", choices=("auto", "cuda", "cpu"), default="auto")
+    live.add_argument("--asd-chunk-seconds", type=float, default=4.0)
+    live.add_argument("--asd-overlap-seconds", type=float, default=0.4)
+    live.add_argument("--asd-threshold", type=float, default=0.0)
+    live.add_argument("--asd-min-segment-ms", type=int, default=200)
+    live.add_argument("--asd-bridge-gap-ms", type=int, default=160)
+    live.add_argument("--asd-crop-scale", type=float, default=0.40)
+    live.add_argument("--asd-queue-size", type=int, default=2)
+    live.add_argument(
+        "--speech-timeline",
+        type=Path,
+        help="Optional finalized A/B/C/D timeline used for incremental Face-ID binding",
+    )
+    live.add_argument("--timeline-offset-ms", type=int, default=0)
+    live.add_argument("--binding-min-evidence-ms", type=int, default=3000)
+    live.add_argument("--binding-min-speaker-coverage", type=float, default=0.50)
+    live.add_argument("--binding-min-margin", type=float, default=0.40)
     live.add_argument("--host", default="127.0.0.1")
     live.add_argument("--port", type=int, default=8765)
     live.add_argument("--no-open", action="store_true")
@@ -713,6 +736,21 @@ def main() -> int:
                 semantic_proxy=args.groq_proxy,
                 semantic_minimum_interval=args.semantic_minimum_interval,
                 semantic_queue_size=args.semantic_queue_size,
+                active_speaker_enabled=args.active_speaker,
+                active_speaker_model=args.asd_model,
+                active_speaker_device=args.asd_device,
+                active_speaker_chunk_seconds=args.asd_chunk_seconds,
+                active_speaker_overlap_seconds=args.asd_overlap_seconds,
+                active_speaker_threshold=args.asd_threshold,
+                active_speaker_min_segment_ms=args.asd_min_segment_ms,
+                active_speaker_bridge_gap_ms=args.asd_bridge_gap_ms,
+                active_speaker_crop_scale=args.asd_crop_scale,
+                active_speaker_queue_size=args.asd_queue_size,
+                speech_timeline_path=args.speech_timeline,
+                timeline_offset_ms=args.timeline_offset_ms,
+                binding_min_evidence_ms=args.binding_min_evidence_ms,
+                binding_min_speaker_coverage=args.binding_min_speaker_coverage,
+                binding_min_margin=args.binding_min_margin,
                 progress=lambda message: print(f"[live] {message}", flush=True),
             )
         if args.command == "project-participants":

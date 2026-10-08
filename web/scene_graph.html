@@ -537,7 +537,9 @@
       const eventText = live ? `${data.events_emitted} 个事件` : `${data.events_emitted}/${data.events_total} 个事件`;
       const semantics = data.scene_semantics;
       const semanticText = semantics?.enabled ? ` · Qwen ${semantics.analyzed} 已完成/${semantics.pending} 等待${semantics.status === 'degraded' ? ' · 语义服务降级' : ''}` : '';
-      setStatus(`${names[data.status] || data.status} · ${eventText}${semanticText}${data.error ? ' · ' + data.error : ''}`, data.status === 'error');
+      const active = data.active_speaker;
+      const activeText = active?.enabled ? ` · LR-ASD ${active.processed_chunks} 块/${active.pending} 等待 · ${active.segments} 段发言${active.confirmed_bindings ? ` · ${active.confirmed_bindings} 个身份绑定` : ''}${active.status === 'degraded' ? ' · 主动说话人降级' : ''}` : '';
+      setStatus(`${names[data.status] || data.status} · ${eventText}${semanticText}${activeText}${data.error ? ' · ' + data.error : ''}`, data.status === 'error');
       if (changed) { renderTimeline(); renderGraph(); }
     }
 

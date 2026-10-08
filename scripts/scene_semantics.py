@@ -13,7 +13,6 @@ import cv2
 
 from .groq_client import chat_completion
 from .models import file_sha256
-from .scene_context import validate_scene_context
 
 
 PROMPT_VERSION = "scene-semantics-qwen3.8-v3"
@@ -743,6 +742,8 @@ def analyze_scene_semantics(
     transport: Optional[Callable[[dict], dict]] = None,
     progress: Optional[Callable[[str], None]] = None,
 ) -> dict:
+    from .scene_context import validate_scene_context
+
     if not 1 <= batch_size <= 3:
         raise ValueError("Qwen image batch size must be between one and three")
     scene_path = scene_path.expanduser().resolve()

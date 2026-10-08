@@ -225,9 +225,24 @@ bash setup-asd.sh
   --semantic-model qwen/qwen3.8-27b
 ```
 
-帧线程只负责保存关键帧并写入固定大小的语义队列，Groq 上的 Qwen 在独立线程中分析环境、物体和有直接画面证据的交互。结果到达后会生成 `node_available`、`object_detected` 和 `interaction_detected` 事件并立即更新网页；图片本身不能可靠判断发言，因此实时图像语义会过滤 `speaking` 和 `listening`，它们由下一阶段的主动说话人链路提供。`--semantic-queue-size` 默认保留 8 个待分析帧，积压时丢弃最旧任务；成功响应保存在 `semantic_cache/`，再次运行可直接命中缓存。Groq 网络或权限错误只会把语义状态标为 `degraded`，本地人物与切镜处理仍会完成。代理可通过 `--groq-proxy` 指定。
+帧线程只负责保存关键帧并写入固定大小的语义队列，Groq 上的 Qwen 在独立线程中分析环境、物体和有直接画面证据的交互。结果到达后会生成 `node_available`、`object_detected` 和 `interaction_detected` 事件并立即更新网页；图片本身不能可靠判断发言，因此实时图像语义会过滤 `speaking` 和 `listening`，它们由主动说话人链路提供。`--semantic-queue-size` 默认保留 8 个待分析帧，积压时丢弃最旧任务；成功响应保存在 `semantic_cache/`，再次运行可直接命中缓存。Groq 网络或权限错误只会把语义状态标为 `degraded`，本地人物与切镜处理仍会完成。代理可通过 `--groq-proxy` 指定。
 
-内存中的事件由 `--event-window` 限制，完整事件顺序追加到 `vision_events.jsonl`。最终结果还包括 `live_visual_graph.json`、`live_metrics.json` 和 `live_keyframes/`。指标记录近期 P50/P95 帧延迟、最大调度落后、30 秒热身后的 RSS 增长和固定为 0 的进程 GPU 显存；当前实时人脸与切镜路径不加载 CUDA。使用下面的命令可以加速跑完整段稳定性测试并在结束后退出：
+启用分块主动说话人检测，并可选绑定语音侧 A/B/C/D：
+
+```bash
+bash setup-asd.sh
+
+./lab live-video \
+  data/raw/cctv-robot-life-first30.mp4 \
+  --output results/live-cctv30-full \
+  --active-speaker \
+  --asd-device cuda \
+  --speech-timeline /path/to/speech_spans.json
+```
+
+主线程只累计每个 Face-ID 的时间和人脸框；LR-ASD 后台线程默认每 4 秒处理一个块，并保留 0.4 秒重叠来减少边界截断。它从对应视频区间插值出 25 FPS 人脸序列，结合音频输出发言片段，再增量生成 `person_speaking` 事件。默认继续遵循首版“一次只有一位主要发言者”的约束。`--speech-timeline` 可以指向静态或持续更新的最终 A/B/C/D 时间线；每个块完成后都会重新读取该文件，累计至少 3 秒且满足覆盖率与领先幅度后才确认 Speaker—Face-ID，证据不足时保持匿名 Face-ID。LR-ASD 加载或推理失败只会使主动说话人状态降级，不中断人物和场景处理。
+
+内存中的事件由 `--event-window` 限制，完整事件顺序追加到 `vision_events.jsonl`。最终结果还包括 `live_visual_graph.json`、`live_metrics.json` 和 `live_keyframes/`。指标记录近期 P50/P95 帧延迟、最大调度落后、30 秒热身后的 RSS 增长以及当前/峰值进程 GPU 显存；未启用 LR-ASD 时实时人脸与切镜路径不加载 CUDA。使用下面的命令可以加速跑完整段稳定性测试并在结束后退出：
 
 ```bash
 ./lab live-video \
@@ -239,7 +254,7 @@ bash setup-asd.sh
   --exit-on-complete
 ```
 
-实时入口现在覆盖本地人物/切镜观察和可选的异步环境、物体、交互推断；尚未生成实时 `person_speaking`，也没有把 A/B/C/D 时间线绑定到 Face-ID。
+实时入口现在覆盖本地人物与切镜观察、可选的异步环境/物体/交互推断、分块主动说话人检测，以及 A/B/C/D 与 Face-ID 的保守增量绑定。
 
 将语音记忆接入场景图：
 
@@ -314,6 +329,8 @@ results/live-example/
 ├── live_visual_graph.json
 ├── live_metrics.json
 ├── live_scene_semantics.jsonl
+├── live_active_speaker.jsonl
+├── live_speaker_bindings.json
 ├── vision_events.jsonl
 ├── semantic_cache/
 └── live_keyframes/
@@ -364,13 +381,13 @@ results/live-example/
 - 中文 102 秒片段的 18 个在线切镜边界与离线结果逐一对应，5 FPS 共处理 511 张采样帧，30 秒热身后 RSS 增长 4.2 MB；
 - 英文 9 分 41 秒视频共处理 2789 张采样帧，事件内存保持固定窗口，RSS 在约 6 分钟后稳定于约 260 MB，进程 GPU 显存保持 0；
 - 中文 30 秒片段的异步语义冒烟测试完成 5 张关键帧，增量生成 4 个场景物体节点；模拟云端故障时 151 张本地采样帧仍全部处理完成，语义状态正确降级；
+- 中文 30 秒片段的实时 LR-ASD 共处理 9 个重叠块，平均每块约 0.18 秒，CUDA 峰值显存约 135 MB；发言顺序为 `Face-01≈0.4–8.6s`、`Face-02≈9.2–21.0s`、`Face-03≈21.6–30.0s`，与已知三位发言者一致，并确认 `A→Face-01`、`B→Face-02`、`C→Face-03`；
 - 英文前 60 秒视觉图已与同场 250 秒语音记忆融合，超出视觉范围的话轮保持可检索且不生成虚假场景关系；
 - 两条样例都通过结构引用、时间范围和单一说话者约束检查，主动说话视频保留原始音频。
 
 ## 后续顺序
 
-1. 将分块主动说话人结果与 A/B/C/D 时间线写入实时人物事件；
-2. 接入摄像头输入和人工纠错；
-3. 建立跨会话人物档案。
+1. 接入摄像头输入和人工纠错；
+2. 建立跨会话人物档案。
 
 语音基线固定为 `HT-voice-lab` 标签 `voice-baseline-2026-09-28`。

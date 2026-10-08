@@ -10,8 +10,6 @@ from urllib.parse import parse_qs, urlparse
 
 from .live_replay import VisionReplay
 from .models import file_sha256
-from .scene_context import validate_scene_context
-from .scene_graph import validate_scene_graph
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +17,9 @@ PAGE = ROOT / "web" / "scene_graph.html"
 
 
 def _load_sources(graph_path: Path) -> Tuple[dict, dict, Dict[str, Path]]:
+    from .scene_context import validate_scene_context
+    from .scene_graph import validate_scene_graph
+
     graph = json.loads(graph_path.read_text(encoding="utf-8"))
     if graph.get("context_type") == "multimodal_conversation_graph":
         from .conversation_graph import validate_conversation_graph
