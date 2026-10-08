@@ -261,10 +261,17 @@ def _parser() -> argparse.ArgumentParser:
     live.add_argument("--asd-model", choices=("ava", "talkset"), default="talkset")
     live.add_argument("--asd-device", choices=("auto", "cuda", "cpu"), default="auto")
     live.add_argument("--asd-chunk-seconds", type=float, default=4.0)
-    live.add_argument("--asd-overlap-seconds", type=float, default=0.4)
+    live.add_argument(
+        "--asd-overlap-seconds",
+        type=float,
+        default=3.0,
+        help="Rolling context overlap; 4 s context with 3 s overlap publishes every 1 s",
+    )
     live.add_argument("--asd-threshold", type=float, default=0.0)
     live.add_argument("--asd-min-segment-ms", type=int, default=200)
     live.add_argument("--asd-bridge-gap-ms", type=int, default=160)
+    live.add_argument("--asd-start-confirm-ms", type=int, default=200)
+    live.add_argument("--asd-end-silence-ms", type=int, default=1000)
     live.add_argument("--asd-crop-scale", type=float, default=0.40)
     live.add_argument("--asd-queue-size", type=int, default=2)
     live.add_argument(
@@ -744,6 +751,8 @@ def main() -> int:
                 active_speaker_threshold=args.asd_threshold,
                 active_speaker_min_segment_ms=args.asd_min_segment_ms,
                 active_speaker_bridge_gap_ms=args.asd_bridge_gap_ms,
+                active_speaker_start_confirm_ms=args.asd_start_confirm_ms,
+                active_speaker_end_silence_ms=args.asd_end_silence_ms,
                 active_speaker_crop_scale=args.asd_crop_scale,
                 active_speaker_queue_size=args.asd_queue_size,
                 speech_timeline_path=args.speech_timeline,

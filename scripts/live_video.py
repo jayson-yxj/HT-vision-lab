@@ -206,10 +206,12 @@ class LiveVideoSession:
         active_speaker_model: str = "talkset",
         active_speaker_device: str = "auto",
         active_speaker_chunk_seconds: float = 4.0,
-        active_speaker_overlap_seconds: float = 0.4,
+        active_speaker_overlap_seconds: float = 3.0,
         active_speaker_threshold: float = 0.0,
         active_speaker_min_segment_ms: int = 200,
         active_speaker_bridge_gap_ms: int = 160,
+        active_speaker_start_confirm_ms: int = 200,
+        active_speaker_end_silence_ms: int = 1000,
         active_speaker_crop_scale: float = 0.40,
         active_speaker_queue_size: int = 2,
         speech_timeline_path: Optional[Path] = None,
@@ -217,7 +219,7 @@ class LiveVideoSession:
         binding_min_evidence_ms: int = 3000,
         binding_min_speaker_coverage: float = 0.50,
         binding_min_margin: float = 0.40,
-        active_speaker_processor: Optional[Callable[[object], Sequence[dict]]] = None,
+        active_speaker_processor: Optional[Callable[[object], object]] = None,
         progress: Optional[Callable[[str], None]] = None,
     ) -> None:
         if sample_fps <= 0 or not 0.1 <= speed <= 100:
@@ -237,6 +239,8 @@ class LiveVideoSession:
             or active_speaker_overlap_seconds < 0
             or active_speaker_overlap_seconds >= active_speaker_chunk_seconds
             or active_speaker_queue_size < 1
+            or active_speaker_start_confirm_ms < 40
+            or active_speaker_end_silence_ms < 40
         ):
             raise ValueError("active-speaker chunk, overlap and queue parameters are invalid")
         for name, value in (
@@ -369,6 +373,10 @@ class LiveVideoSession:
         self._active_speaker_failed = 0
         self._active_speaker_dropped = 0
         self._active_speaker_latency_total = 0.0
+        self._speaking_state_machine = None
+        self._speaking_phase_counts = {"started": 0, "continued": 0, "ended": 0}
+        self._speaking_start_latencies = deque(maxlen=1000)
+        self._speaking_end_latencies = deque(maxlen=1000)
         self._active_speaker_last_error: Optional[str] = None
         self._active_segments: List[dict] = []
         self._speaking_edges: Dict[str, str] = {}
@@ -378,13 +386,24 @@ class LiveVideoSession:
         self._asd_observations: Dict[str, List[dict]] = {}
         self._asd_chunk_ms = round(active_speaker_chunk_seconds * 1000)
         self._asd_overlap_ms = round(active_speaker_overlap_seconds * 1000)
+        self._asd_hop_ms = self._asd_chunk_ms - self._asd_overlap_ms
         self._asd_chunk_start_ms = 0
-        self._asd_next_end_ms = self._asd_chunk_ms
+        self._asd_next_end_ms = self._asd_hop_ms
+        self._asd_last_end_ms = 0
         self._asd_chunk_count = 0
         self._speaker_binder = None
         active_speaker_enabled = active_speaker_enabled or speech_timeline_path is not None
         if active_speaker_enabled:
-            from .live_active_speaker import LiveActiveSpeakerWorker, OnlineSpeakerBinder
+            from .live_active_speaker import (
+                FaceSpeakingStateMachine,
+                LiveActiveSpeakerWorker,
+                OnlineSpeakerBinder,
+            )
+
+            self._speaking_state_machine = FaceSpeakingStateMachine(
+                start_confirm_ms=active_speaker_start_confirm_ms,
+                end_silence_ms=active_speaker_end_silence_ms,
+            )
 
             self._active_speaker_worker = LiveActiveSpeakerWorker(
                 self.video_path,
@@ -439,6 +458,9 @@ class LiveVideoSession:
             ),
             "active_speaker_chunk_seconds": active_speaker_chunk_seconds,
             "active_speaker_overlap_seconds": active_speaker_overlap_seconds,
+            "active_speaker_hop_seconds": self._asd_hop_ms / 1000,
+            "active_speaker_start_confirm_ms": active_speaker_start_confirm_ms,
+            "active_speaker_end_silence_ms": active_speaker_end_silence_ms,
             "active_speaker_queue_size": active_speaker_queue_size,
             "speech_timeline_path": (
                 str(self._speaker_binder.timeline_path) if self._speaker_binder else None
@@ -1026,9 +1048,10 @@ class LiveVideoSession:
             self._submit_active_speaker_chunk(self._asd_next_end_ms)
 
     def _submit_active_speaker_chunk(self, end_ms: int, final: bool = False) -> None:
-        if self._active_speaker_worker is None:
+        if self._active_speaker_worker is None or end_ms <= self._asd_last_end_ms:
             return
-        start_ms = self._asd_chunk_start_ms
+        start_ms = max(0, end_ms - self._asd_chunk_ms)
+        publish_start_ms = self._asd_last_end_ms
         selected = {
             face_id: tuple(
                 item
@@ -1038,7 +1061,7 @@ class LiveVideoSession:
             for face_id, observations in self._asd_observations.items()
         }
         selected = {face_id: items for face_id, items in selected.items() if len(items) >= 2}
-        if selected and end_ms - start_ms >= 160 and self._active_speaker_status in {
+        if end_ms - publish_start_ms >= 160 and self._active_speaker_status in {
             "loading",
             "running",
         }:
@@ -1049,13 +1072,15 @@ class LiveVideoSession:
                 ActiveSpeakerChunk(
                     chunk_id=f"live-asd-chunk-{self._asd_chunk_count:05d}",
                     start_ms=start_ms,
+                    publish_start_ms=publish_start_ms,
                     end_ms=end_ms,
                     observations=selected,
                 )
             )
+        self._asd_last_end_ms = end_ms
         if not final:
-            self._asd_chunk_start_ms = end_ms - self._asd_overlap_ms
-            self._asd_next_end_ms = self._asd_chunk_start_ms + self._asd_chunk_ms
+            self._asd_next_end_ms = end_ms + self._asd_hop_ms
+            self._asd_chunk_start_ms = max(0, self._asd_next_end_ms - self._asd_chunk_ms)
             for face_id in list(self._asd_observations):
                 self._asd_observations[face_id] = [
                     item
@@ -1086,17 +1111,22 @@ class LiveVideoSession:
         score: float,
         raw_score: float,
         chunk_id: str,
-        event_file,
-    ) -> None:
+    ) -> Optional[Tuple[dict, dict]]:
         node_id = "visual_identity:" + face_id
         if node_id not in self._nodes:
-            return
+            return None
         current = self._active_segments[-1] if self._active_segments else None
         if (
             current
             and current["face_id"] == face_id
             and current["scene_id"] == scene_id
-            and start_ms <= current["end_ms"] + 160
+            and start_ms
+            <= current["end_ms"]
+            + (
+                self._speaking_state_machine.end_silence_ms
+                if self._speaking_state_machine
+                else 160
+            )
         ):
             current["end_ms"] = max(current["end_ms"], end_ms)
             current["score"] = round(max(current["score"], score), 6)
@@ -1136,21 +1166,55 @@ class LiveVideoSession:
                 "speaker_label": self._nodes[node_id]["attributes"].get("speaker_label"),
             }
             self._speaking_edges[segment["segment_id"]] = edge["id"]
-        speaker_label = self._nodes[node_id]["attributes"].get("speaker_label")
+        return segment, edge
+
+    def _active_speaker_decision_latency_ms(self, timestamp_ms: int) -> int:
+        paused_seconds = self._paused_total
+        if self._paused:
+            paused_seconds += time.monotonic() - self._pause_started
+        media_now_ms = max(
+            0.0,
+            (time.monotonic() - self._wall_started - paused_seconds) * 1000 * self.speed,
+        )
+        return max(0, round(media_now_ms - timestamp_ms))
+
+    def _latest_speaking_evidence(self, face_id: str) -> Optional[Tuple[dict, dict]]:
+        for segment in reversed(self._active_segments):
+            if segment["face_id"] == face_id:
+                return segment, self._edges[self._speaking_edges[segment["segment_id"]]]
+        return None
+
+    def _emit_speaking_phase(self, phase_event: dict, chunk_id: str, event_file) -> None:
+        face_id = phase_event["face_id"]
+        evidence = self._latest_speaking_evidence(face_id)
+        if evidence is None:
+            return
+        segment, edge = evidence
+        node_id = "visual_identity:" + face_id
+        timestamp_ms = int(phase_event["timestamp_ms"])
+        phase = phase_event["phase"]
+        latency_ms = self._active_speaker_decision_latency_ms(timestamp_ms)
+        self._speaking_phase_counts[phase] += 1
+        if phase == "started":
+            self._speaking_start_latencies.append(latency_ms)
+        elif phase == "ended":
+            self._speaking_end_latencies.append(latency_ms)
         self._emit(
             "person_speaking",
-            start_ms,
+            timestamp_ms,
             node_id,
-            scene_id,
+            segment["scene_id"],
             [segment["segment_id"], chunk_id],
-            [node_id, scene_id],
+            [node_id, segment["scene_id"]],
             [edge["id"]],
             {
                 "predicate": "speaking",
+                "phase": phase,
                 "confidence": segment["score"],
                 "epistemic_status": "inferred",
                 "end_ms": segment["end_ms"],
-                "speaker_label": speaker_label,
+                "speaker_label": self._nodes[node_id]["attributes"].get("speaker_label"),
+                "decision_latency_ms": latency_ms,
             },
             event_file,
         )
@@ -1278,7 +1342,7 @@ class LiveVideoSession:
     def _apply_active_speaker_result(
         self,
         chunk,
-        segments: Sequence[dict],
+        result: object,
         elapsed_seconds: float,
     ) -> None:
         with self._condition, self.event_path.open("a", encoding="utf-8") as event_file:
@@ -1286,9 +1350,15 @@ class LiveVideoSession:
                 return
             self._active_speaker_chunks += 1
             self._active_speaker_latency_total += elapsed_seconds
+            if isinstance(result, dict):
+                segments = result.get("segments", [])
+                activity = result.get("activity", [])
+            else:
+                segments = list(result)
+                activity = []
             normalized = []
             for segment in sorted(segments, key=lambda item: item["start_ms"]):
-                start_ms = max(chunk.start_ms, int(segment["start_ms"]))
+                start_ms = max(chunk.publish_start_ms, int(segment["start_ms"]))
                 end_ms = min(chunk.end_ms, int(segment["end_ms"]))
                 if end_ms <= start_ms:
                     continue
@@ -1310,8 +1380,30 @@ class LiveVideoSession:
                         float(segment["score"]),
                         float(segment["raw_score_mean"]),
                         chunk.chunk_id,
-                        event_file,
                     )
+            if not activity:
+                activity = [
+                    {
+                        "face_id": segment["face_id"],
+                        "timestamp_ms": timestamp_ms,
+                        "is_speaking": True,
+                    }
+                    for segment in normalized
+                    for timestamp_ms in range(
+                        segment["start_ms"], segment["end_ms"], 40
+                    )
+                ]
+            phase_events = (
+                self._speaking_state_machine.update(
+                    activity,
+                    publish_start_ms=chunk.publish_start_ms,
+                    end_ms=chunk.end_ms,
+                )
+                if self._speaking_state_machine
+                else []
+            )
+            for phase_event in phase_events:
+                self._emit_speaking_phase(phase_event, chunk.chunk_id, event_file)
             self._update_speaker_bindings(event_file)
             with self.active_speaker_path.open("a", encoding="utf-8") as handle:
                 handle.write(
@@ -1319,10 +1411,12 @@ class LiveVideoSession:
                         {
                             "schema_version": 1,
                             "chunk_id": chunk.chunk_id,
-                            "start_ms": chunk.start_ms,
+                            "context_start_ms": chunk.start_ms,
+                            "publish_start_ms": chunk.publish_start_ms,
                             "end_ms": chunk.end_ms,
                             "elapsed_seconds": round(elapsed_seconds, 6),
                             "segments": normalized,
+                            "speaking_events": phase_events,
                         },
                         ensure_ascii=False,
                     )
@@ -1643,6 +1737,8 @@ class LiveVideoSession:
 
     def _active_speaker_metrics(self) -> dict:
         pending = self._active_speaker_worker.pending if self._active_speaker_worker else 0
+        start_latencies = list(self._speaking_start_latencies)
+        end_latencies = list(self._speaking_end_latencies)
         return {
             "enabled": self._active_speaker_worker is not None,
             "status": self._active_speaker_status,
@@ -1652,6 +1748,15 @@ class LiveVideoSession:
             "failed_chunks": self._active_speaker_failed,
             "dropped_chunks": self._active_speaker_dropped,
             "segments": len(self._active_segments),
+            "events_by_phase": dict(self._speaking_phase_counts),
+            "decision_latency_ms": {
+                "started_p50": round(_percentile(start_latencies, 0.50), 3),
+                "started_p95": round(_percentile(start_latencies, 0.95), 3),
+                "started_max": round(max(start_latencies), 3) if start_latencies else 0.0,
+                "ended_p50": round(_percentile(end_latencies, 0.50), 3),
+                "ended_p95": round(_percentile(end_latencies, 0.95), 3),
+                "ended_max": round(max(end_latencies), 3) if end_latencies else 0.0,
+            },
             "confirmed_bindings": sum(
                 item["status"] == "confirmed" for item in self._speaker_bindings
             ),

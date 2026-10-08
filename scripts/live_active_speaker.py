@@ -22,8 +22,135 @@ from .speaker_face_binding import (
 class ActiveSpeakerChunk:
     chunk_id: str
     start_ms: int
+    publish_start_ms: int
     end_ms: int
     observations: Dict[str, Tuple[dict, ...]]
+
+
+class FaceSpeakingStateMachine:
+    """Turn frame activity into independent start/continue/end events per Face-ID."""
+
+    def __init__(self, *, start_confirm_ms: int = 200, end_silence_ms: int = 1000) -> None:
+        if start_confirm_ms < 40 or end_silence_ms < 40:
+            raise ValueError("speaking confirmation durations must be at least 40 ms")
+        self.start_confirm_ms = start_confirm_ms
+        self.end_silence_ms = end_silence_ms
+        self.states: Dict[str, dict] = {}
+
+    @staticmethod
+    def _deduplicate(records: Sequence[dict]) -> Dict[str, List[dict]]:
+        grouped: Dict[str, Dict[int, dict]] = {}
+        for item in records:
+            face_id = item.get("face_id")
+            if not face_id:
+                continue
+            timestamp_ms = int(item["timestamp_ms"])
+            current = grouped.setdefault(face_id, {}).get(timestamp_ms)
+            if current is None or bool(item.get("is_speaking")):
+                grouped[face_id][timestamp_ms] = item
+        return {
+            face_id: [items[timestamp] for timestamp in sorted(items)]
+            for face_id, items in grouped.items()
+        }
+
+    def update(
+        self,
+        records: Sequence[dict],
+        *,
+        publish_start_ms: int,
+        end_ms: int,
+    ) -> List[dict]:
+        grouped = self._deduplicate(
+            [
+                item
+                for item in records
+                if publish_start_ms <= int(item["timestamp_ms"]) < end_ms
+            ]
+        )
+        events = []
+        for face_id in sorted(set(self.states) | set(grouped)):
+            state = self.states.setdefault(
+                face_id,
+                {
+                    "status": "silent",
+                    "positive_since_ms": None,
+                    "negative_since_ms": None,
+                },
+            )
+            samples = list(grouped.get(face_id, ()))
+            if state["status"] == "silent" and not samples:
+                state["positive_since_ms"] = None
+            if state["status"] == "speaking":
+                tail_start = (
+                    max(publish_start_ms, int(samples[-1]["timestamp_ms"]) + 40)
+                    if samples
+                    else publish_start_ms
+                )
+                if tail_start < end_ms:
+                    samples.append(
+                        {
+                            "face_id": face_id,
+                            "timestamp_ms": tail_start,
+                            "is_speaking": False,
+                        }
+                    )
+
+            started = False
+            ended = False
+            positive_seen = False
+            for item in samples:
+                timestamp_ms = int(item["timestamp_ms"])
+                sample_end_ms = min(end_ms, timestamp_ms + 40)
+                if bool(item.get("is_speaking")):
+                    positive_seen = True
+                    state["negative_since_ms"] = None
+                    if state["status"] == "silent":
+                        if state["positive_since_ms"] is None:
+                            state["positive_since_ms"] = timestamp_ms
+                        if sample_end_ms - state["positive_since_ms"] >= self.start_confirm_ms:
+                            state["status"] = "speaking"
+                            started = True
+                            events.append(
+                                {
+                                    "face_id": face_id,
+                                    "phase": "started",
+                                    "timestamp_ms": state["positive_since_ms"],
+                                }
+                            )
+                    continue
+
+                state["positive_since_ms"] = None
+                if state["status"] != "speaking":
+                    continue
+                if state["negative_since_ms"] is None:
+                    state["negative_since_ms"] = timestamp_ms
+                if end_ms - state["negative_since_ms"] >= self.end_silence_ms:
+                    state["status"] = "silent"
+                    ended = True
+                    events.append(
+                        {
+                            "face_id": face_id,
+                            "phase": "ended",
+                            "timestamp_ms": state["negative_since_ms"],
+                        }
+                    )
+                    state["negative_since_ms"] = None
+
+            if state["status"] == "speaking" and positive_seen and not started and not ended:
+                first_positive = next(
+                    int(item["timestamp_ms"])
+                    for item in samples
+                    if bool(item.get("is_speaking"))
+                )
+                events.append(
+                    {
+                        "face_id": face_id,
+                        "phase": "continued",
+                        "timestamp_ms": first_positive,
+                    }
+                )
+        order = {"ended": 0, "started": 1, "continued": 2}
+        return sorted(events, key=lambda item: (item["timestamp_ms"], order[item["phase"]]))
 
 
 def _sequence_specs(
@@ -163,7 +290,7 @@ class LiveActiveSpeakerWorker:
         video_path: Path,
         source_fps: float,
         *,
-        on_result: Callable[[ActiveSpeakerChunk, Sequence[dict], float], None],
+        on_result: Callable[[ActiveSpeakerChunk, object, float], None],
         on_error: Callable[[Optional[ActiveSpeakerChunk], Exception], None],
         on_drop: Callable[[ActiveSpeakerChunk], None],
         on_ready: Callable[[str], None],
@@ -175,7 +302,7 @@ class LiveActiveSpeakerWorker:
         bridge_gap_ms: int = 160,
         crop_scale: float = 0.40,
         queue_size: int = 2,
-        processor: Optional[Callable[[ActiveSpeakerChunk], Sequence[dict]]] = None,
+        processor: Optional[Callable[[ActiveSpeakerChunk], object]] = None,
     ) -> None:
         if model_name not in {"ava", "talkset"}:
             raise ValueError("active-speaker model must be ava or talkset")
@@ -270,7 +397,7 @@ class LiveActiveSpeakerWorker:
         audio = _decode_audio(self.video_path)
         self.on_ready(str(device))
 
-        def process(chunk: ActiveSpeakerChunk) -> Sequence[dict]:
+        def process(chunk: ActiveSpeakerChunk) -> dict:
             sequences = []
             for spec in _sequence_specs(chunk, self.source_fps):
                 sequence = TrackSequence(**spec)
@@ -286,7 +413,7 @@ class LiveActiveSpeakerWorker:
                 sequence.crops = None
                 sequences.append(sequence)
             if not sequences:
-                return []
+                return {"segments": [], "activity": []}
             _assign_activity(
                 sequences,
                 self.threshold,
@@ -294,7 +421,8 @@ class LiveActiveSpeakerWorker:
                 int(math.floor(self.bridge_gap_ms / ASD_FRAME_MS)),
                 True,
             )
-            return _segments(_score_records(sequences, self.source_fps))
+            records = _score_records(sequences, self.source_fps)
+            return {"segments": _segments(records), "activity": records}
 
         return process
 
@@ -315,8 +443,10 @@ class LiveActiveSpeakerWorker:
                 self._running = True
                 started = time.monotonic()
                 try:
-                    segments = processor(chunk)
-                    self.on_result(chunk, segments, time.monotonic() - started)
+                    result = processor(chunk)
+                    if not isinstance(result, dict):
+                        result = {"segments": list(result), "activity": []}
+                    self.on_result(chunk, result, time.monotonic() - started)
                 except Exception as error:
                     self.on_error(chunk, error)
                     self.tasks.task_done()

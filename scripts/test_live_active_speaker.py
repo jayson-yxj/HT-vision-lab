@@ -7,6 +7,7 @@ from pathlib import Path
 
 from scripts.live_active_speaker import (
     ActiveSpeakerChunk,
+    FaceSpeakingStateMachine,
     LiveActiveSpeakerWorker,
     OnlineSpeakerBinder,
     _sequence_specs,
@@ -25,6 +26,7 @@ def _chunk(index: int, face_id: str = "Face-01") -> ActiveSpeakerChunk:
     return ActiveSpeakerChunk(
         chunk_id=f"chunk-{index}",
         start_ms=start,
+        publish_start_ms=start,
         end_ms=start + 4000,
         observations={face_id: observations},
     )
@@ -114,8 +116,70 @@ def test_worker_bounds_chunks_without_loading_torch() -> None:
     assert dropped == ["chunk-2"]
 
 
+def test_speaking_state_is_independent_for_each_face() -> None:
+    machine = FaceSpeakingStateMachine(start_confirm_ms=200, end_silence_ms=600)
+    first = machine.update(
+        [
+            {
+                "face_id": "Face-01",
+                "timestamp_ms": timestamp,
+                "is_speaking": True,
+            }
+            for timestamp in range(0, 1000, 40)
+        ],
+        publish_start_ms=0,
+        end_ms=1000,
+    )
+    second = machine.update(
+        [
+            {
+                "face_id": "Face-02",
+                "timestamp_ms": timestamp,
+                "is_speaking": True,
+            }
+            for timestamp in range(1000, 2000, 40)
+        ],
+        publish_start_ms=1000,
+        end_ms=2000,
+    )
+    assert first == [
+        {"face_id": "Face-01", "phase": "started", "timestamp_ms": 0}
+    ]
+    assert {item["face_id"]: item["phase"] for item in second} == {
+        "Face-01": "ended",
+        "Face-02": "started",
+    }
+    assert next(item for item in second if item["face_id"] == "Face-01")[
+        "timestamp_ms"
+    ] == 1000
+
+
+def test_subsecond_boundary_gap_does_not_end_speaker() -> None:
+    machine = FaceSpeakingStateMachine(start_confirm_ms=200, end_silence_ms=1000)
+    machine.update(
+        [
+            {"face_id": "Face-01", "timestamp_ms": timestamp, "is_speaking": True}
+            for timestamp in range(0, 1000, 40)
+        ],
+        publish_start_ms=0,
+        end_ms=1000,
+    )
+    assert machine.update([], publish_start_ms=1000, end_ms=1960) == []
+    resumed = machine.update(
+        [
+            {"face_id": "Face-01", "timestamp_ms": timestamp, "is_speaking": True}
+            for timestamp in range(1960, 2960, 40)
+        ],
+        publish_start_ms=1960,
+        end_ms=2960,
+    )
+    assert [item["phase"] for item in resumed] == ["continued"]
+
+
 if __name__ == "__main__":
     test_face_observations_interpolate_to_25fps()
     test_online_binding_requires_accumulated_timeline_overlap()
     test_worker_bounds_chunks_without_loading_torch()
+    test_speaking_state_is_independent_for_each_face()
+    test_subsecond_boundary_gap_does_not_end_speaker()
     print("PASS: chunked active speaker interpolation, queue bounds and A/B binding")
