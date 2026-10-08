@@ -243,6 +243,16 @@ def _parser() -> argparse.ArgumentParser:
     live.add_argument("--min-scene-seconds", type=float, default=1.0)
     live.add_argument("--keyframe-interval-seconds", type=float, default=30.0)
     live.add_argument("--event-window", type=int, default=100)
+    live.add_argument(
+        "--scene-semantics",
+        action="store_true",
+        help="Analyze live keyframes asynchronously with Qwen on Groq",
+    )
+    live.add_argument("--semantic-model", default="qwen/qwen3.8-27b")
+    live.add_argument("--semantic-timeout", type=float, default=60.0)
+    live.add_argument("--semantic-minimum-interval", type=float, default=0.2)
+    live.add_argument("--semantic-queue-size", type=int, default=8)
+    live.add_argument("--groq-proxy")
     live.add_argument("--host", default="127.0.0.1")
     live.add_argument("--port", type=int, default=8765)
     live.add_argument("--no-open", action="store_true")
@@ -697,6 +707,12 @@ def main() -> int:
                 min_scene_seconds=args.min_scene_seconds,
                 keyframe_interval_seconds=args.keyframe_interval_seconds,
                 event_window=args.event_window,
+                semantic_enabled=args.scene_semantics,
+                semantic_model=args.semantic_model,
+                semantic_timeout=args.semantic_timeout,
+                semantic_proxy=args.groq_proxy,
+                semantic_minimum_interval=args.semantic_minimum_interval,
+                semantic_queue_size=args.semantic_queue_size,
                 progress=lambda message: print(f"[live] {message}", flush=True),
             )
         if args.command == "project-participants":

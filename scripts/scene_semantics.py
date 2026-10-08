@@ -528,6 +528,23 @@ def _cached_request(
     return raw, request_hash, False
 
 
+def analyze_scene_batch(
+    analyzer: GroqSceneAnalyzer,
+    metadata: Sequence[dict],
+    image_paths: Sequence[Path],
+    cache_dir: Path,
+) -> Tuple[List[dict], str, bool]:
+    """Analyze one small keyframe batch and persist the compatible response cache."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return _cached_request(
+        analyzer,
+        analyzer.model,
+        metadata,
+        image_paths,
+        cache_dir,
+    )
+
+
 def _seed_cached_analyses(
     cache_dir: Path,
     model: str,
@@ -624,6 +641,42 @@ def _is_scene_object(value: dict, environment: dict) -> bool:
     if label in {"subtitle", "text"}:
         return False
     return label != "logo" or environment.get("category") == "graphic_or_title"
+
+
+def normalize_live_analysis(raw: dict, visible_face_ids: Sequence[str]) -> dict:
+    """Clean one image-only response before it enters the live evidence graph."""
+    visible = set(visible_face_ids)
+    environment = _repair_environment(raw["environment"], raw["objects"])
+    objects = [
+        {
+            **value,
+            "label": _canonical_object_label(value["label"]),
+            "epistemic_status": "inferred",
+        }
+        for value in raw["objects"]
+        if _is_scene_object(value, environment)
+    ]
+    interactions = []
+    for value in raw["interactions"]:
+        subject = value.get("subject_ref")
+        target = value.get("object_ref")
+        if subject not in visible or value.get("predicate") in {"speaking", "listening"}:
+            continue
+        if target and target.startswith("Face-") and target not in visible:
+            continue
+        if target and not (
+            target.startswith("Face-")
+            or target.startswith("object:")
+            or target in {"group", "scene"}
+        ):
+            continue
+        interactions.append({**value, "epistemic_status": "inferred"})
+    return {
+        "keyframe_id": raw["keyframe_id"],
+        "environment": {**environment, "epistemic_status": "inferred"},
+        "objects": objects,
+        "interactions": interactions,
+    }
 
 
 def _normalize_analyses(

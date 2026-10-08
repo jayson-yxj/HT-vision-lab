@@ -19,7 +19,9 @@ import cv2
 import numpy as np
 
 from .face_tracks import Detection, _detect, _draw_box, box_iou, cosine_similarity
+from .live_semantics import LiveSemanticWorker, SemanticTask
 from .models import file_sha256, model_path, require_models
+from .scene_semantics import GroqSceneAnalyzer, normalize_live_analysis
 
 
 @dataclass
@@ -193,6 +195,13 @@ class LiveVideoSession:
         min_scene_seconds: float = 1.0,
         keyframe_interval_seconds: float = 30.0,
         event_window: int = 100,
+        semantic_enabled: bool = False,
+        semantic_model: str = "qwen/qwen3.8-27b",
+        semantic_timeout: float = 60.0,
+        semantic_proxy: Optional[str] = None,
+        semantic_minimum_interval: float = 0.2,
+        semantic_queue_size: int = 8,
+        semantic_analyzer: Optional[GroqSceneAnalyzer] = None,
         progress: Optional[Callable[[str], None]] = None,
     ) -> None:
         if sample_fps <= 0 or not 0.1 <= speed <= 100:
@@ -205,6 +214,8 @@ class LiveVideoSession:
             raise ValueError("scene threshold must be between zero and one")
         if not 1 <= event_window <= 1000:
             raise ValueError("event window must be between 1 and 1000")
+        if semantic_queue_size < 1:
+            raise ValueError("semantic queue size must be positive")
         for name, value in (
             ("detection_threshold", detection_threshold),
             ("reid_threshold", reid_threshold),
@@ -225,6 +236,8 @@ class LiveVideoSession:
         self.keyframe_dir.mkdir()
         self.event_path = self.output_dir / "vision_events.jsonl"
         self.event_path.write_text("", encoding="utf-8")
+        self.semantic_path = self.output_dir / "live_scene_semantics.jsonl"
+        self.semantic_path.write_text("", encoding="utf-8")
         self.video_sha256 = file_sha256(self.video_path)
 
         capture = cv2.VideoCapture(str(self.video_path))
@@ -261,6 +274,7 @@ class LiveVideoSession:
 
         self._condition = threading.Condition()
         self._thread: Optional[threading.Thread] = None
+        self._video_finished = False
         self._stop = False
         self._paused = False
         self._status = "ready"
@@ -277,6 +291,8 @@ class LiveVideoSession:
         self._presence_edges: Dict[Tuple[str, str], str] = {}
         self._keyframes: List[dict] = []
         self._keyframe_paths: Dict[str, Path] = {}
+        self._semantic_objects: Dict[Tuple[str, str], str] = {}
+        self._semantic_interactions: Dict[Tuple[str, str, str, str], str] = {}
         self._revision = 0
         self._sampled_frames = 0
         self._detections = 0
@@ -294,6 +310,32 @@ class LiveVideoSession:
         self._wall_started = 0.0
         self._paused_total = 0.0
         self._pause_started = 0.0
+        self._semantic_status = "disabled"
+        self._semantic_analyzed = 0
+        self._semantic_failed = 0
+        self._semantic_dropped = 0
+        self._semantic_cache_hits = 0
+        self._semantic_last_error: Optional[str] = None
+        self._semantic_model = semantic_model
+        self._semantic_worker: Optional[LiveSemanticWorker] = None
+        if semantic_enabled or semantic_analyzer is not None:
+            analyzer = semantic_analyzer or GroqSceneAnalyzer(
+                model=semantic_model,
+                timeout=semantic_timeout,
+                proxy=semantic_proxy,
+                minimum_interval=semantic_minimum_interval,
+            )
+            self._semantic_model = analyzer.model
+            self._semantic_worker = LiveSemanticWorker(
+                analyzer,
+                self.output_dir / "semantic_cache",
+                on_result=self._apply_semantic_result,
+                on_error=self._record_semantic_error,
+                on_drop=self._record_semantic_drop,
+                on_finished=self._finish_semantics,
+                queue_size=semantic_queue_size,
+            )
+            self._semantic_status = "ready"
         self._parameters = {
             "sample_fps": round(self.sample_fps, 6),
             "speed": self.speed,
@@ -308,6 +350,9 @@ class LiveVideoSession:
             "min_scene_seconds": min_scene_seconds,
             "keyframe_interval_seconds": keyframe_interval_seconds,
             "event_window": event_window,
+            "semantic_enabled": self._semantic_worker is not None,
+            "semantic_model": self._semantic_model if self._semantic_worker else None,
+            "semantic_queue_size": semantic_queue_size,
         }
 
     @property
@@ -322,18 +367,25 @@ class LiveVideoSession:
             self._status = "playing"
             self._started_at = datetime.now(timezone.utc).isoformat()
             self._wall_started = time.monotonic()
+            if self._semantic_worker:
+                self._semantic_status = "running"
+                self._semantic_worker.start()
             self._thread = threading.Thread(target=self._run, name="live-video", daemon=True)
             self._thread.start()
 
     def stop(self) -> None:
         with self._condition:
             self._stop = True
-            if self._status == "playing":
+            if self._status in {"playing", "analyzing"}:
                 self._status = "stopped"
+            if self._semantic_status in {"ready", "running"}:
+                self._semantic_status = "stopped"
             self._condition.notify_all()
             thread = self._thread
         if thread and thread is not threading.current_thread():
             thread.join(timeout=5)
+        if self._semantic_worker:
+            self._semantic_worker.stop()
 
     def _wait_for_timestamp(self, timestamp_ms: int) -> bool:
         with self._condition:
@@ -388,6 +440,7 @@ class LiveVideoSession:
         timestamp_ms: int,
         confidence: float,
         evidence_refs: Sequence[str],
+        epistemic_status: str = "observed",
     ) -> dict:
         edge_id = f"edge-{len(self._edges) + 1:06d}"
         edge = {
@@ -395,7 +448,7 @@ class LiveVideoSession:
             "source": source,
             "target": target,
             "predicate": predicate,
-            "epistemic_status": "observed",
+            "epistemic_status": epistemic_status,
             "confidence": round(float(confidence), 6),
             "start_ms": int(timestamp_ms),
             "end_ms": min(self.duration_ms, int(timestamp_ms + self.sample_period_ms)),
@@ -506,6 +559,7 @@ class LiveVideoSession:
             {"label": f"实时场景 {scene_index}", "confidence": 1.0},
             event_file,
         )
+        self._enqueue_semantics(keyframe_id, scene_id, timestamp_ms, tracked)
 
     def _sample_scene(
         self,
@@ -536,6 +590,305 @@ class LiveVideoSession:
             {"label": scene["label"], "confidence": 1.0},
             event_file,
         )
+        self._enqueue_semantics(
+            keyframe_id,
+            self._current_scene_id,
+            timestamp_ms,
+            tracked,
+        )
+
+    def _enqueue_semantics(
+        self,
+        keyframe_id: str,
+        scene_id: str,
+        timestamp_ms: int,
+        tracked: Sequence[Tuple[Detection, OnlineTrack]],
+    ) -> None:
+        if self._semantic_worker is None or self._semantic_status != "running":
+            return
+        visible_people = []
+        for detection, track in tracked:
+            if track.face_id is None:
+                continue
+            x, y, width, height = detection.box
+            center_x = (x + width / 2) / self.width
+            center_y = (y + height / 2) / self.height
+            visible_people.append(
+                {
+                    "face_id": track.face_id,
+                    "speaker_label": None,
+                    "identity_status": "visual_only",
+                    "horizontal_region": (
+                        "left" if center_x < 1 / 3 else "right" if center_x > 2 / 3 else "center"
+                    ),
+                    "vertical_region": (
+                        "top" if center_y < 1 / 3 else "bottom" if center_y > 2 / 3 else "middle"
+                    ),
+                }
+            )
+        self._semantic_worker.submit(
+            SemanticTask(
+                keyframe_id=keyframe_id,
+                scene_id=scene_id,
+                timestamp_ms=timestamp_ms,
+                metadata={
+                    "keyframe_id": keyframe_id,
+                    "shot_id": scene_id,
+                    "timestamp_ms": timestamp_ms,
+                    "shot_start_ms": self._nodes[scene_id]["attributes"]["start_ms"],
+                    "shot_end_ms": min(self.duration_ms, timestamp_ms + self.sample_period_ms),
+                    "visible_people": visible_people,
+                    "spatial_relations": [],
+                    "transcript": [],
+                },
+                image_path=self._keyframe_paths[keyframe_id],
+            )
+        )
+
+    def _upsert_semantic_object(
+        self,
+        scene_id: str,
+        value: dict,
+        timestamp_ms: int,
+        evidence_ref: str,
+    ) -> Tuple[str, str]:
+        label = value["label"]
+        key = (scene_id, label)
+        node_id = self._semantic_objects.get(key)
+        if node_id is None:
+            node_id = f"{scene_id}:object:{len(self._semantic_objects) + 1:03d}"
+            self._semantic_objects[key] = node_id
+            self._nodes[node_id] = {
+                "id": node_id,
+                "type": "object",
+                "label": label,
+                "epistemic_status": "inferred",
+                "confidence": round(float(value["confidence"]), 6),
+                "evidence_refs": [evidence_ref],
+                "attributes": {
+                    "scene_id": scene_id,
+                    "count": int(value.get("count", 1)),
+                    "regions": [value.get("region", "unknown")],
+                },
+            }
+            edge = self._append_edge(
+                scene_id,
+                node_id,
+                "contains",
+                timestamp_ms,
+                value["confidence"],
+                [evidence_ref],
+                "inferred",
+            )
+            return node_id, edge["id"]
+        node = self._nodes[node_id]
+        node["confidence"] = max(node["confidence"], round(float(value["confidence"]), 6))
+        node["attributes"]["count"] = max(
+            node["attributes"]["count"], int(value.get("count", 1))
+        )
+        region = value.get("region", "unknown")
+        if region not in node["attributes"]["regions"]:
+            node["attributes"]["regions"].append(region)
+        if evidence_ref not in node["evidence_refs"]:
+            node["evidence_refs"].append(evidence_ref)
+        edge = next(
+            edge
+            for edge in self._edges.values()
+            if edge["source"] == scene_id
+            and edge["target"] == node_id
+            and edge["predicate"] == "contains"
+        )
+        edge["end_ms"] = min(
+            self.duration_ms,
+            max(edge["end_ms"], timestamp_ms + self.sample_period_ms),
+        )
+        edge["confidence"] = max(edge["confidence"], node["confidence"])
+        if evidence_ref not in edge["evidence_refs"]:
+            edge["evidence_refs"].append(evidence_ref)
+        return node_id, edge["id"]
+
+    def _apply_semantic_result(
+        self,
+        task: SemanticTask,
+        raw: dict,
+        request_hash: str,
+        cache_hit: bool,
+    ) -> None:
+        visible_faces = [item["face_id"] for item in task.metadata["visible_people"]]
+        analysis = normalize_live_analysis(raw, visible_faces)
+        with self._condition, self.event_path.open("a", encoding="utf-8") as event_file:
+            if self._stop or task.scene_id not in self._nodes:
+                return
+            self._semantic_analyzed += 1
+            self._semantic_cache_hits += int(cache_hit)
+            analysis_id = f"live-semantic-{self._semantic_analyzed:06d}"
+            evidence_ref = analysis_id
+            scene = self._nodes[task.scene_id]
+            environment = analysis["environment"]
+            description = environment["description"].strip()
+            scene["attributes"]["environment_category"] = environment["category"]
+            if description and description not in scene["attributes"]["descriptions"]:
+                scene["attributes"]["descriptions"].append(description)
+            scene["attributes"]["semantic_status"] = "analyzed"
+            scene["attributes"].setdefault("semantic_keyframe_ids", []).append(
+                task.keyframe_id
+            )
+            if description:
+                scene["label"] = description
+            if evidence_ref not in scene["evidence_refs"]:
+                scene["evidence_refs"].append(evidence_ref)
+            self._emit(
+                "node_available",
+                task.timestamp_ms,
+                task.scene_id,
+                None,
+                [task.keyframe_id, evidence_ref],
+                [task.scene_id],
+                [],
+                {
+                    "label": scene["label"],
+                    "environment_category": environment["category"],
+                    "confidence": environment["confidence"],
+                    "epistemic_status": "inferred",
+                },
+                event_file,
+            )
+            for value in analysis["objects"]:
+                node_id, edge_id = self._upsert_semantic_object(
+                    task.scene_id,
+                    value,
+                    task.timestamp_ms,
+                    evidence_ref,
+                )
+                self._emit(
+                    "object_detected",
+                    task.timestamp_ms,
+                    task.scene_id,
+                    node_id,
+                    [task.keyframe_id, evidence_ref],
+                    [task.scene_id, node_id],
+                    [edge_id],
+                    {
+                        "predicate": "contains",
+                        "confidence": value["confidence"],
+                        "epistemic_status": "inferred",
+                    },
+                    event_file,
+                )
+            for value in analysis["interactions"]:
+                source = "visual_identity:" + value["subject_ref"]
+                if source not in self._nodes:
+                    continue
+                object_ref = value.get("object_ref")
+                if object_ref and object_ref.startswith("Face-"):
+                    target = "visual_identity:" + object_ref
+                elif object_ref and object_ref.startswith("object:"):
+                    target, _ = self._upsert_semantic_object(
+                        task.scene_id,
+                        {
+                            "label": object_ref.split(":", 1)[1],
+                            "count": 1,
+                            "region": "unknown",
+                            "confidence": value["confidence"],
+                        },
+                        task.timestamp_ms,
+                        evidence_ref,
+                    )
+                else:
+                    target = task.scene_id
+                if target not in self._nodes:
+                    continue
+                key = (task.scene_id, source, value["predicate"], target)
+                edge_id = self._semantic_interactions.get(key)
+                if edge_id is None:
+                    edge = self._append_edge(
+                        source,
+                        target,
+                        value["predicate"],
+                        task.timestamp_ms,
+                        value["confidence"],
+                        [evidence_ref],
+                        "inferred",
+                    )
+                    edge["attributes"] = {
+                        "object_scope": object_ref,
+                        "descriptions": [value["description"]],
+                        "evidence_basis": sorted(set(value["evidence_basis"])),
+                    }
+                    edge_id = edge["id"]
+                    self._semantic_interactions[key] = edge_id
+                else:
+                    edge = self._edges[edge_id]
+                    edge["end_ms"] = min(
+                        self.duration_ms,
+                        max(edge["end_ms"], task.timestamp_ms + self.sample_period_ms),
+                    )
+                    edge["confidence"] = max(
+                        edge["confidence"], round(float(value["confidence"]), 6)
+                    )
+                    if evidence_ref not in edge["evidence_refs"]:
+                        edge["evidence_refs"].append(evidence_ref)
+                    if value["description"] not in edge["attributes"]["descriptions"]:
+                        edge["attributes"]["descriptions"].append(value["description"])
+                    edge["attributes"]["evidence_basis"] = sorted(
+                        set(edge["attributes"]["evidence_basis"] + value["evidence_basis"])
+                    )
+                self._emit(
+                    "interaction_detected",
+                    task.timestamp_ms,
+                    source,
+                    target,
+                    [task.keyframe_id, evidence_ref],
+                    [source, target],
+                    [edge_id],
+                    {
+                        "predicate": value["predicate"],
+                        "confidence": value["confidence"],
+                        "epistemic_status": "inferred",
+                    },
+                    event_file,
+                )
+            record = {
+                "schema_version": 1,
+                "analysis_id": analysis_id,
+                "scene_id": task.scene_id,
+                "timestamp_ms": task.timestamp_ms,
+                "request_sha256": request_hash,
+                "cache_hit": cache_hit,
+                **analysis,
+            }
+            with self.semantic_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+            self._revision += 1
+            self.progress(
+                f"Qwen completed {task.keyframe_id}: "
+                f"objects={len(analysis['objects'])}, "
+                f"interactions={len(analysis['interactions'])}"
+            )
+
+    def _record_semantic_error(self, task: SemanticTask, error: Exception) -> None:
+        with self._condition:
+            self._semantic_failed += 1
+            self._semantic_status = "degraded"
+            self._semantic_last_error = str(error)
+            self._revision += 1
+        self.progress(f"Qwen failed {task.keyframe_id}: {error}")
+
+    def _record_semantic_drop(self, task: SemanticTask) -> None:
+        with self._condition:
+            self._semantic_dropped += 1
+            self._revision += 1
+        self.progress(f"Qwen queue skipped {task.keyframe_id}")
+
+    def _finish_semantics(self) -> None:
+        with self._condition:
+            if self._semantic_status not in {"degraded", "stopped"}:
+                self._semantic_status = "complete"
+            if self._video_finished and self._status not in {"error", "stopped"}:
+                self._status = "complete"
+                self._finished_at = datetime.now(timezone.utc).isoformat()
+            self._revision += 1
+        self._write_outputs()
 
     def _update_faces(
         self,
@@ -724,9 +1077,15 @@ class LiveVideoSession:
                     if not self._stop:
                         self._current_ms = self.duration_ms
                         self._close_scene(self.duration_ms)
-                        self._status = "complete"
-                    self._finished_at = datetime.now(timezone.utc).isoformat()
+                        self._video_finished = True
+                        if self._semantic_worker and not self._semantic_worker.finished:
+                            self._status = "analyzing"
+                        else:
+                            self._status = "complete"
+                            self._finished_at = datetime.now(timezone.utc).isoformat()
                     self._revision += 1
+                if self._semantic_worker and not self._stop:
+                    self._semantic_worker.close()
         except Exception as error:
             with self._condition:
                 self._status = "error"
@@ -772,14 +1131,20 @@ class LiveVideoSession:
                 "height": self.height,
             },
             "processing": {
-                "mode": "live_frame_stream_v1",
+                "mode": "live_frame_stream_v2",
                 "inference_device": "cpu",
                 "parameters": self._parameters,
+                "scene_semantics": self._semantic_metrics(),
             },
             "nodes": list(self._nodes.values()),
             "edges": list(self._edges.values()),
             "statistics": self._statistics(),
             "warnings": ([self._error] if self._error else [])
+            + (
+                ["Live scene semantics degraded: " + self._semantic_last_error]
+                if self._semantic_last_error
+                else []
+            )
             + (
                 [
                     f"Dropped {self.tracker.dropped_identity_candidates} unassigned "
@@ -788,6 +1153,21 @@ class LiveVideoSession:
                 if self.tracker.dropped_identity_candidates
                 else []
             ),
+        }
+
+    def _semantic_metrics(self) -> dict:
+        pending = self._semantic_worker.pending if self._semantic_worker else 0
+        return {
+            "enabled": self._semantic_worker is not None,
+            "provider": "groq" if self._semantic_worker else None,
+            "model": self._semantic_model if self._semantic_worker else None,
+            "status": self._semantic_status,
+            "pending": pending,
+            "analyzed": self._semantic_analyzed,
+            "failed": self._semantic_failed,
+            "dropped": self._semantic_dropped,
+            "cache_hits": self._semantic_cache_hits,
+            "last_error": self._semantic_last_error,
         }
 
     def _metrics(self) -> dict:
@@ -830,6 +1210,7 @@ class LiveVideoSession:
                 "samples": list(self._memory_samples),
             },
             "inference_device": "cpu",
+            "scene_semantics": self._semantic_metrics(),
             "error": self._error,
         }
 
@@ -860,6 +1241,7 @@ class LiveVideoSession:
                 "visible_edge_ids": list(self._edges),
                 "events": list(self._events),
                 "metrics": self._metrics(),
+                "scene_semantics": self._semantic_metrics(),
                 "error": self._error,
             }
 

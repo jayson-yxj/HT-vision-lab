@@ -531,11 +531,13 @@
       byId('replay-position').value = String(data.current_ms);
       byId('replay-position').disabled = live;
       byId('replay-time').textContent = `${formatTime(data.current_ms)} / ${formatTime(data.duration_ms)}`;
-      byId('replay-toggle').textContent = data.status === 'playing' ? '暂停' : data.status === 'complete' ? (live ? '已结束' : '重播') : data.status === 'error' ? '运行失败' : '继续';
-      byId('replay-toggle').disabled = live && ['complete', 'error'].includes(data.status);
-      const names = {ready: '正在启动', playing: live ? '实时处理中' : '回放中', paused: '已暂停', complete: live ? '处理完成' : '回放完成', error: '处理失败'};
+      byId('replay-toggle').textContent = data.status === 'playing' ? '暂停' : data.status === 'analyzing' ? '语义分析中' : data.status === 'complete' ? (live ? '已结束' : '重播') : data.status === 'error' ? '运行失败' : '继续';
+      byId('replay-toggle').disabled = live && ['analyzing', 'complete', 'error'].includes(data.status);
+      const names = {ready: '正在启动', playing: live ? '实时处理中' : '回放中', paused: '已暂停', analyzing: '等待场景语义完成', complete: live ? '处理完成' : '回放完成', error: '处理失败'};
       const eventText = live ? `${data.events_emitted} 个事件` : `${data.events_emitted}/${data.events_total} 个事件`;
-      setStatus(`${names[data.status] || data.status} · ${eventText}${data.error ? ' · ' + data.error : ''}`, data.status === 'error');
+      const semantics = data.scene_semantics;
+      const semanticText = semantics?.enabled ? ` · Qwen ${semantics.analyzed} 已完成/${semantics.pending} 等待${semantics.status === 'degraded' ? ' · 语义服务降级' : ''}` : '';
+      setStatus(`${names[data.status] || data.status} · ${eventText}${semanticText}${data.error ? ' · ' + data.error : ''}`, data.status === 'error');
       if (changed) { renderTimeline(); renderGraph(); }
     }
 
