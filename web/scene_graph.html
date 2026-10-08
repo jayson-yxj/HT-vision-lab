@@ -49,6 +49,12 @@
     .chip { padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; background: rgba(17, 34, 48, .72); color: var(--muted); }
     .chip strong { color: var(--text); }
     .timeline-wrap { padding: 18px 28px; border-bottom: 1px solid var(--line); background: rgba(5, 13, 20, .55); }
+    .timeline-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .replay-controls { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+    .replay-controls[hidden] { display: none; }
+    .replay-controls button { border: 1px solid var(--line); border-radius: 8px; padding: 5px 9px; background: var(--panel); cursor: pointer; }
+    .replay-controls input { width: min(28vw, 280px); accent-color: var(--person); }
+    .replay-time { min-width: 100px; color: var(--person); font: 12px/1.2 ui-monospace, monospace; }
     .section-label { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
     .timeline { display: flex; min-height: 74px; gap: 5px; margin-top: 9px; overflow-x: auto; }
     .timeline button {
@@ -58,6 +64,7 @@
     }
     .timeline button:hover { transform: translateY(-2px); border-color: var(--scene); }
     .timeline button.active { border-color: var(--scene); background: rgba(169,134,255,.25); box-shadow: inset 0 -3px 0 var(--scene); }
+    .timeline button.future { opacity: .38; }
     .timeline .time { display: block; color: var(--scene); font-size: 11px; font-weight: 800; }
     .timeline .name { display: block; margin-top: 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
     .timeline .category { color: var(--muted); font-size: 11px; }
@@ -129,6 +136,8 @@
       .workspace { display: block; }
       aside { border-left: 0; border-top: 1px solid var(--line); }
       .headline-row { align-items: start; flex-direction: column; }
+      .timeline-head { align-items: start; flex-direction: column; }
+      .replay-controls { flex-wrap: wrap; }
       .search { margin-left: 0; }
     }
   </style>
@@ -142,7 +151,15 @@
     <div id="stats" class="stats"></div>
   </header>
   <section class="timeline-wrap">
-    <div class="section-label">场景时间轴 · 点击场景进行聚焦，再次点击取消</div>
+    <div class="timeline-head">
+      <div id="timeline-label" class="section-label">场景时间轴 · 点击场景进行聚焦，再次点击取消</div>
+      <div id="replay-controls" class="replay-controls" hidden>
+        <button id="replay-toggle">暂停</button>
+        <button id="replay-restart">从头开始</button>
+        <input id="replay-position" type="range" min="0" max="0" value="0" aria-label="回放位置">
+        <span id="replay-time" class="replay-time">00:00.0 / 00:00.0</span>
+      </div>
+    </div>
     <div id="timeline" class="timeline"></div>
   </section>
   <main class="workspace">
@@ -196,7 +213,7 @@
       using: '使用', pointing_to: '指向', sitting_with: '同坐', standing_with: '同站', touching: '接触', other: '其他'
     };
     const state = {
-      payload: null, etag: '', selectedScene: null, selectedId: null, contextType: null,
+      payload: null, etag: '', selectedScene: null, selectedId: null, contextType: null, replay: null,
       nodeFilters: {person: true, visual_identity: true, scene: true, object: true, topic: true, opinion: true, intent: true},
       edgeFilters: {interaction: true, dialogue: true, structure: true, identity: true}, search: ''
     };
@@ -249,7 +266,8 @@
         const button = document.createElement('button');
         const duration = Math.max(1, scene.attributes.duration_ms);
         button.style.flexGrow = String(Math.max(1, Math.sqrt(duration / 1000)));
-        button.classList.toggle('active', scene.id === state.selectedScene);
+        button.classList.toggle('active', scene.id === state.selectedScene || scene.id === state.replay?.current_scene_id);
+        button.classList.toggle('future', state.replay && scene.attributes.start_ms > state.replay.current_ms);
         button.title = scene.label;
         const time = document.createElement('span'); time.className = 'time';
         time.textContent = `${formatTime(scene.attributes.start_ms)}–${formatTime(scene.attributes.end_ms)}`;
@@ -257,6 +275,7 @@
         const category = document.createElement('span'); category.className = 'category'; category.textContent = scene.attributes.environment_category;
         button.append(time, name, category);
         button.addEventListener('click', () => {
+          if (state.replay) { replayControl('seek', scene.attributes.start_ms); return; }
           state.selectedScene = state.selectedScene === scene.id ? null : scene.id;
           state.selectedId = state.selectedScene;
           renderAll();
@@ -276,6 +295,11 @@
       const allNodes = new Map(graph.nodes.map(node => [node.id, node]));
       let candidateIds = new Set(allNodes.keys());
       let candidateEdges = graph.edges;
+      if (state.replay) {
+        candidateIds = new Set(state.replay.visible_node_ids);
+        const visibleEdges = new Set(state.replay.visible_edge_ids);
+        candidateEdges = graph.edges.filter(edge => visibleEdges.has(edge.id));
+      }
       const range = selectedSceneRange();
       if (range) {
         const [start, end] = range;
@@ -486,12 +510,50 @@
       try {
         const headers = state.etag ? {'If-None-Match': state.etag} : {};
         const response = await fetch('/api/graph', {cache: 'no-store', headers});
-        if (response.status === 304) { setStatus('图数据已是最新'); return; }
+        if (response.status === 304) { if (!state.replay) setStatus('图数据已是最新'); return; }
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
         state.payload = data; state.etag = response.headers.get('ETag') || '';
         if (state.selectedScene && !data.graph.nodes.some(node => node.id === state.selectedScene)) state.selectedScene = null;
         setStatus(`已载入 ${data.graph.statistics.nodes} 个节点`); renderAll();
+      } catch (error) { setStatus(error.message, true); }
+    }
+
+    function applyReplay(data) {
+      const changed = !state.replay || data.events_emitted !== state.replay.events_emitted || data.current_scene_id !== state.replay.current_scene_id;
+      state.replay = data;
+      byId('replay-controls').hidden = false;
+      byId('timeline-label').textContent = '实时事件回放 · 点击场景可跳转';
+      byId('replay-position').max = String(data.duration_ms);
+      byId('replay-position').value = String(data.current_ms);
+      byId('replay-time').textContent = `${formatTime(data.current_ms)} / ${formatTime(data.duration_ms)}`;
+      byId('replay-toggle').textContent = data.status === 'playing' ? '暂停' : data.status === 'complete' ? '重播' : '继续';
+      const names = {playing: '回放中', paused: '已暂停', complete: '回放完成'};
+      setStatus(`${names[data.status]} · ${data.events_emitted}/${data.events_total} 个事件`);
+      if (changed) { renderTimeline(); renderGraph(); }
+    }
+
+    async function loadReplay() {
+      try {
+        const response = await fetch('/api/replay', {cache: 'no-store'});
+        if (response.status === 404) return false;
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+        applyReplay(data); return true;
+      } catch (error) { setStatus(error.message, true); return true; }
+    }
+
+    async function replayControl(action, timestampMs = null) {
+      if (action === 'resume' && state.replay?.status === 'complete') action = 'restart';
+      try {
+        const payload = {action};
+        if (timestampMs !== null) payload.timestamp_ms = Math.round(timestampMs);
+        const response = await fetch('/api/replay/control', {
+          method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+        applyReplay(data);
       } catch (error) { setStatus(error.message, true); }
     }
 
@@ -505,7 +567,16 @@
     byId('clear').addEventListener('click', () => { state.selectedScene = null; state.selectedId = null; renderAll(); resetDetails(); });
     byId('close-preview').addEventListener('click', () => byId('preview').close());
     byId('preview').addEventListener('click', event => { if (event.target === byId('preview')) byId('preview').close(); });
-    load(); setInterval(load, 5000);
+    byId('replay-toggle').addEventListener('click', () => replayControl(state.replay?.status === 'playing' ? 'pause' : 'resume'));
+    byId('replay-restart').addEventListener('click', () => replayControl('restart'));
+    byId('replay-position').addEventListener('change', event => replayControl('seek', Number(event.target.value)));
+    async function start() {
+      await load();
+      const enabled = await loadReplay();
+      if (enabled) setInterval(loadReplay, 400);
+      setInterval(load, 5000);
+    }
+    start();
   </script>
 </body>
 </html>

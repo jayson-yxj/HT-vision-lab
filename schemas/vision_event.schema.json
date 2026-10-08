@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hightorque.local/schemas/vision-event-v1.json",
+  "title": "HT visual event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "event_id", "sequence", "type", "timestamp_ms", "subject_ref", "object_ref", "evidence_refs", "payload"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "event_id": {"type": "string", "pattern": "^vision-event-[0-9]{6}$"},
+    "sequence": {"type": "integer", "minimum": 1},
+    "type": {
+      "enum": ["scene_changed", "person_seen", "person_speaking", "object_detected", "identity_candidate", "interaction_detected", "dialogue_linked", "relation_observed", "node_available"]
+    },
+    "timestamp_ms": {"type": "integer", "minimum": 0},
+    "subject_ref": {"type": "string", "minLength": 1},
+    "object_ref": {"type": ["string", "null"]},
+    "evidence_refs": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "payload": {
+      "type": "object",
+      "required": ["reveal_node_ids", "reveal_edge_ids"],
+      "properties": {
+        "reveal_node_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "reveal_edge_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    }
+  }
+}

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
+from .live_replay import VisionReplay
 from .models import file_sha256
 from .scene_context import validate_scene_context
 from .scene_graph import validate_scene_graph
@@ -62,6 +63,7 @@ def create_server(
     graph_path: Path,
     host: str = "127.0.0.1",
     port: int = 8765,
+    replay: Optional[VisionReplay] = None,
 ) -> Tuple[ThreadingHTTPServer, Path, str]:
     source = graph_path.expanduser().resolve()
     if not source.is_file():
@@ -98,6 +100,13 @@ def create_server(
                 self._send(204, "image/x-icon")
                 return
             try:
+                if parsed.path == "/api/replay":
+                    if replay is None:
+                        self._send(404, "application/json; charset=utf-8", b'{"error":"replay is not enabled"}')
+                        return
+                    body = json.dumps(replay.snapshot(), ensure_ascii=False).encode("utf-8")
+                    self._send(200, "application/json; charset=utf-8", body)
+                    return
                 graph, assets, keyframe_paths = _load_sources(source)
                 if parsed.path == "/api/graph":
                     stat = source.stat()
@@ -124,6 +133,32 @@ def create_server(
                 body = json.dumps({"error": str(error)}, ensure_ascii=False).encode("utf-8")
                 self._send(422, "application/json; charset=utf-8", body)
 
+        def do_POST(self) -> None:
+            parsed = urlparse(self.path)
+            if parsed.path != "/api/replay/control" or replay is None:
+                self._send(404, "text/plain; charset=utf-8", b"Not found\n")
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 4096:
+                    raise ValueError("invalid request body length")
+                payload = json.loads(self.rfile.read(length))
+                if not isinstance(payload, dict):
+                    raise ValueError("request body must be a JSON object")
+                timestamp_ms = payload.get("timestamp_ms")
+                if timestamp_ms is not None and (
+                    isinstance(timestamp_ms, bool) or not isinstance(timestamp_ms, int)
+                ):
+                    raise ValueError("timestamp_ms must be an integer")
+                body = json.dumps(
+                    replay.control(payload.get("action", ""), timestamp_ms),
+                    ensure_ascii=False,
+                ).encode("utf-8")
+                self._send(200, "application/json; charset=utf-8", body)
+            except (TypeError, ValueError, json.JSONDecodeError) as error:
+                body = json.dumps({"error": str(error)}, ensure_ascii=False).encode("utf-8")
+                self._send(400, "application/json; charset=utf-8", body)
+
         def log_message(self, _format: str, *_args) -> None:
             pass
 
@@ -140,6 +175,42 @@ def serve_scene_graph(
 ) -> int:
     server, source, url = create_server(graph_path, host, port)
     print("Watching " + str(source), flush=True)
+    print(url, flush=True)
+    if open_browser:
+        webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0
+
+
+def serve_vision_replay(
+    graph_path: Path,
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    open_browser: bool = True,
+    speed: float = 1.0,
+    start_ms: int = 0,
+    event_window: int = 100,
+) -> int:
+    source = graph_path.expanduser().resolve()
+    graph, _, _ = _load_sources(source)
+    replay = VisionReplay(
+        graph,
+        speed=speed,
+        start_ms=start_ms,
+        event_window=event_window,
+    )
+    server, _, url = create_server(source, host, port, replay=replay)
+    print(f"Replaying {source}", flush=True)
+    print(
+        f"[replay] duration={replay.duration_ms / 1000:.1f}s, "
+        f"events={len(replay.events)}, speed={replay.speed:g}x",
+        flush=True,
+    )
     print(url, flush=True)
     if open_browser:
         webbrowser.open(url)

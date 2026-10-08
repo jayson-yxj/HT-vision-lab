@@ -212,6 +212,18 @@ def _parser() -> argparse.ArgumentParser:
     visualize_conversation.add_argument("--port", type=int, default=8765)
     visualize_conversation.add_argument("--no-open", action="store_true")
 
+    replay = commands.add_parser(
+        "replay-vision",
+        help="Replay an existing visual graph as time-ordered live events",
+    )
+    replay.add_argument("graph_json", type=Path)
+    replay.add_argument("--speed", type=float, default=1.0)
+    replay.add_argument("--start-ms", type=int, default=0)
+    replay.add_argument("--event-window", type=int, default=100)
+    replay.add_argument("--host", default="127.0.0.1")
+    replay.add_argument("--port", type=int, default=8765)
+    replay.add_argument("--no-open", action="store_true")
+
     participants = commands.add_parser(
         "project-participants",
         help="Project visual identities into an existing participant context",
@@ -621,6 +633,18 @@ def main() -> int:
                 host=args.host,
                 port=args.port,
                 open_browser=not args.no_open,
+            )
+        if args.command == "replay-vision":
+            from .scene_graph_server import serve_vision_replay
+
+            return serve_vision_replay(
+                args.graph_json,
+                host=args.host,
+                port=args.port,
+                open_browser=not args.no_open,
+                speed=args.speed,
+                start_ms=args.start_ms,
+                event_window=args.event_window,
             )
         if args.command == "project-participants":
             from .multimodal_context import project_multimodal_context
