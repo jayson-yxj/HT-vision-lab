@@ -53,6 +53,7 @@
     .replay-controls { display: flex; align-items: center; gap: 8px; color: var(--muted); }
     .replay-controls[hidden] { display: none; }
     .replay-controls button { border: 1px solid var(--line); border-radius: 8px; padding: 5px 9px; background: var(--panel); cursor: pointer; }
+    .replay-controls button:disabled, .replay-controls input:disabled { cursor: default; opacity: .45; }
     .replay-controls input { width: min(28vw, 280px); accent-color: var(--person); }
     .replay-time { min-width: 100px; color: var(--person); font: 12px/1.2 ui-monospace, monospace; }
     .section-label { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
@@ -275,7 +276,7 @@
         const category = document.createElement('span'); category.className = 'category'; category.textContent = scene.attributes.environment_category;
         button.append(time, name, category);
         button.addEventListener('click', () => {
-          if (state.replay) { replayControl('seek', scene.attributes.start_ms); return; }
+          if (state.replay?.mode === 'replay') { replayControl('seek', scene.attributes.start_ms); return; }
           state.selectedScene = state.selectedScene === scene.id ? null : scene.id;
           state.selectedId = state.selectedScene;
           renderAll();
@@ -522,14 +523,19 @@
     function applyReplay(data) {
       const changed = !state.replay || data.events_emitted !== state.replay.events_emitted || data.current_scene_id !== state.replay.current_scene_id;
       state.replay = data;
+      const live = data.mode === 'live';
       byId('replay-controls').hidden = false;
-      byId('timeline-label').textContent = '实时事件回放 · 点击场景可跳转';
+      byId('timeline-label').textContent = live ? '实时视频事件 · 点击场景进行聚焦' : '实时事件回放 · 点击场景可跳转';
+      byId('replay-restart').hidden = live;
       byId('replay-position').max = String(data.duration_ms);
       byId('replay-position').value = String(data.current_ms);
+      byId('replay-position').disabled = live;
       byId('replay-time').textContent = `${formatTime(data.current_ms)} / ${formatTime(data.duration_ms)}`;
-      byId('replay-toggle').textContent = data.status === 'playing' ? '暂停' : data.status === 'complete' ? '重播' : '继续';
-      const names = {playing: '回放中', paused: '已暂停', complete: '回放完成'};
-      setStatus(`${names[data.status]} · ${data.events_emitted}/${data.events_total} 个事件`);
+      byId('replay-toggle').textContent = data.status === 'playing' ? '暂停' : data.status === 'complete' ? (live ? '已结束' : '重播') : data.status === 'error' ? '运行失败' : '继续';
+      byId('replay-toggle').disabled = live && ['complete', 'error'].includes(data.status);
+      const names = {ready: '正在启动', playing: live ? '实时处理中' : '回放中', paused: '已暂停', complete: live ? '处理完成' : '回放完成', error: '处理失败'};
+      const eventText = live ? `${data.events_emitted} 个事件` : `${data.events_emitted}/${data.events_total} 个事件`;
+      setStatus(`${names[data.status] || data.status} · ${eventText}${data.error ? ' · ' + data.error : ''}`, data.status === 'error');
       if (changed) { renderTimeline(); renderGraph(); }
     }
 
@@ -539,7 +545,10 @@
         if (response.status === 404) return false;
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
-        applyReplay(data); return true;
+        const graphChanged = data.mode === 'live' && (!state.replay || data.events_emitted !== state.replay.events_emitted);
+        applyReplay(data);
+        if (graphChanged) await load();
+        return true;
       } catch (error) { setStatus(error.message, true); return true; }
     }
 

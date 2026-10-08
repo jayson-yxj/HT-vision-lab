@@ -196,6 +196,7 @@ class VisionReplay:
             )
             return {
                 "schema_version": 1,
+                "mode": "replay",
                 "status": status,
                 "current_ms": current_ms,
                 "duration_ms": self.duration_ms,

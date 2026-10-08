@@ -63,14 +63,18 @@ def create_server(
     graph_path: Path,
     host: str = "127.0.0.1",
     port: int = 8765,
-    replay: Optional[VisionReplay] = None,
+    replay: Optional[object] = None,
+    live: Optional[object] = None,
 ) -> Tuple[ThreadingHTTPServer, Path, str]:
     source = graph_path.expanduser().resolve()
     if not source.is_file():
         raise FileNotFoundError("graph is missing: " + str(source))
     if not PAGE.is_file():
         raise FileNotFoundError("scene graph page is missing: " + str(PAGE))
-    _load_sources(source)
+    if live is None:
+        _load_sources(source)
+    else:
+        live.graph_payload()
     page = PAGE.read_bytes()
 
     class Handler(BaseHTTPRequestHandler):
@@ -107,10 +111,14 @@ def create_server(
                     body = json.dumps(replay.snapshot(), ensure_ascii=False).encode("utf-8")
                     self._send(200, "application/json; charset=utf-8", body)
                     return
-                graph, assets, keyframe_paths = _load_sources(source)
-                if parsed.path == "/api/graph":
+                if live is None:
+                    graph, assets, keyframe_paths = _load_sources(source)
                     stat = source.stat()
                     etag = f'"{stat.st_mtime_ns}-{stat.st_size}"'
+                else:
+                    graph, assets, keyframe_paths, revision = live.graph_payload()
+                    etag = f'"live-{revision}"'
+                if parsed.path == "/api/graph":
                     if self.headers.get("If-None-Match") == etag:
                         self._send(304, "application/json", etag=etag)
                         return

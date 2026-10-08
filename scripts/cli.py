@@ -224,6 +224,34 @@ def _parser() -> argparse.ArgumentParser:
     replay.add_argument("--port", type=int, default=8765)
     replay.add_argument("--no-open", action="store_true")
 
+    live = commands.add_parser(
+        "live-video",
+        help="Read a video in real time and emit incremental scene and Face-ID events",
+    )
+    live.add_argument("video", type=Path)
+    live.add_argument("--output", type=Path, required=True)
+    live.add_argument("--sample-fps", type=float, default=5.0)
+    live.add_argument("--speed", type=float, default=1.0)
+    live.add_argument("--detection-threshold", type=float, default=0.70)
+    live.add_argument("--min-face-size", type=int, default=24)
+    live.add_argument("--max-gap-seconds", type=float, default=0.8)
+    live.add_argument("--reid-threshold", type=float, default=0.75)
+    live.add_argument("--cluster-threshold", type=float, default=0.45)
+    live.add_argument("--min-track-observations", type=int, default=3)
+    live.add_argument("--max-people", type=int, default=4)
+    live.add_argument("--scene-threshold", type=float, default=0.45)
+    live.add_argument("--min-scene-seconds", type=float, default=1.0)
+    live.add_argument("--keyframe-interval-seconds", type=float, default=30.0)
+    live.add_argument("--event-window", type=int, default=100)
+    live.add_argument("--host", default="127.0.0.1")
+    live.add_argument("--port", type=int, default=8765)
+    live.add_argument("--no-open", action="store_true")
+    live.add_argument(
+        "--exit-on-complete",
+        action="store_true",
+        help="Write final metrics and exit instead of keeping the web page open",
+    )
+
     participants = commands.add_parser(
         "project-participants",
         help="Project visual identities into an existing participant context",
@@ -645,6 +673,31 @@ def main() -> int:
                 speed=args.speed,
                 start_ms=args.start_ms,
                 event_window=args.event_window,
+            )
+        if args.command == "live-video":
+            from .live_video import serve_live_video
+
+            return serve_live_video(
+                args.video,
+                args.output,
+                host=args.host,
+                port=args.port,
+                open_browser=not args.no_open,
+                exit_on_complete=args.exit_on_complete,
+                sample_fps=args.sample_fps,
+                speed=args.speed,
+                detection_threshold=args.detection_threshold,
+                min_face_size=args.min_face_size,
+                max_gap_seconds=args.max_gap_seconds,
+                reid_threshold=args.reid_threshold,
+                cluster_threshold=args.cluster_threshold,
+                min_track_observations=args.min_track_observations,
+                max_people=args.max_people,
+                scene_threshold=args.scene_threshold,
+                min_scene_seconds=args.min_scene_seconds,
+                keyframe_interval_seconds=args.keyframe_interval_seconds,
+                event_window=args.event_window,
+                progress=lambda message: print(f"[live] {message}", flush=True),
             )
         if args.command == "project-participants":
             from .multimodal_context import project_multimodal_context

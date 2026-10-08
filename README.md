@@ -23,6 +23,7 @@
 15. 在本地网页中交互查看场景时间轴、关系筛选、证据详情和标注关键帧。
 16. 用人工复核的代表帧评测人物绑定、环境、物体、交互和二维空间关系。
 17. 将已有场景图按原视频时间轴投影成统一视觉事件流，并在网页中增量显示人物、场景、物体和交互。
+18. 直接按视频时间读取帧，在线建立最多 4 个 Face-ID、检测切镜、周期采集关键帧，并记录延迟与内存指标。
 
 人脸检测、特征与主动说话人模型在本地运行；场景语义分析通过 Groq 云 API 调用 Qwen3.8 27B。项目将本地模型 URL 固定到上游仓库的具体 Git revision，下载后校验文件大小和 SHA-256。YuNet 和 LR-ASD 为 MIT，SFace 为 Apache-2.0；详见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
@@ -202,6 +203,32 @@ bash setup-asd.sh
 
 页面从 0 秒状态开始，随后按时间显示 `scene_changed`、`person_seen`、`person_speaking`、`object_detected` 和交互事件；支持暂停、继续、从头开始、拖动进度条及点击场景跳转。`--speed 10` 可用十倍速检查长视频，`--start-ms 300000` 可从 5 分钟处开始，`--event-window` 控制接口最多返回多少条最近事件，避免网页端事件历史随时长无限增长。该命令只回放已经生成的图，不调用 Groq，也不重新执行人脸或场景推理；它用于先验证实时事件协议、状态更新和前端行为，后续逐帧推理会写入同一事件入口。
 
+直接从视频帧实时产生事件：
+
+```bash
+./lab live-video \
+  data/raw/cctv-robot-life-first30.mp4 \
+  --output results/live-cctv30 \
+  --sample-fps 5 \
+  --max-people 4
+```
+
+该命令按视频原始时间运行并打开同一个增量图页面。YuNet 与 SFace 在 CPU 上完成检测、短时跟踪和会话内在线重识别；切镜生成 `scene_changed`，同一镜头超过 30 秒时生成 `scene_sampled` 并保存新关键帧，为后续异步场景语义分析提供输入。网页支持暂停和继续，处理结束后保持打开以便检查结果。
+
+内存中的事件由 `--event-window` 限制，完整事件顺序追加到 `vision_events.jsonl`。最终结果还包括 `live_visual_graph.json`、`live_metrics.json` 和 `live_keyframes/`。指标记录近期 P50/P95 帧延迟、最大调度落后、30 秒热身后的 RSS 增长和固定为 0 的进程 GPU 显存；当前实时人脸与切镜路径不加载 CUDA。使用下面的命令可以加速跑完整段稳定性测试并在结束后退出：
+
+```bash
+./lab live-video \
+  data/raw/cctv-robot-life-first102.mp4 \
+  --output results/live-cctv102-benchmark \
+  --speed 100 \
+  --event-window 10 \
+  --no-open \
+  --exit-on-complete
+```
+
+实时入口当前只负责本地帧级观察，不把画面外观直接推断为环境、物体、交互或发言者。下一阶段由异步 Qwen 工作者消费 `scene_sampled`，随后再把分块主动说话人结果写成 `person_speaking`，两者都不会阻塞帧读取线程。
+
 将语音记忆接入场景图：
 
 ```bash
@@ -268,6 +295,18 @@ results/example/
     └── Face-02.jpg
 ```
 
+`live-video` 使用独立的增量输出：
+
+```text
+results/live-example/
+├── live_visual_graph.json
+├── live_metrics.json
+├── vision_events.jsonl
+└── live_keyframes/
+    ├── live-keyframe-00001.jpg
+    └── live-keyframe-00002.jpg
+```
+
 正式协议位于 [`schemas/visual_tracks.schema.json`](schemas/visual_tracks.schema.json)。主要对象包括：
 
 - `faces`：经过轨迹聚类后的会话内可见人物；
@@ -307,13 +346,17 @@ results/example/
 - 中文 4 个镜头稳定合并为 1 个演播室场景；英文 12 个镜头合并为室内、片头、户外、室内 4 个连续场景，未把片头或户外镜头错误并入访谈室内；
 - 英文场景图网页已验证时间轴聚焦、节点与关系筛选、证据详情、关键帧缩略图和大图预览；
 - 英文 9 分 41 秒场景图已投影为 86 个有序视觉事件，并验证增量显隐、时间跳转、暂停、继续和完成状态；
+- 中文 30 秒片段按真实时间处理得到 4 个 Face-ID 和 4 个镜头，边界为 8.8、21.2、28.4 秒；5 FPS 下 P95 帧延迟为 33.6 ms，最大调度落后为 89.4 ms；
+- 中文 102 秒片段的 18 个在线切镜边界与离线结果逐一对应，5 FPS 共处理 511 张采样帧，30 秒热身后 RSS 增长 4.2 MB；
+- 英文 9 分 41 秒视频共处理 2789 张采样帧，事件内存保持固定窗口，RSS 在约 6 分钟后稳定于约 260 MB，进程 GPU 显存保持 0；
 - 英文前 60 秒视觉图已与同场 250 秒语音记忆融合，超出视觉范围的话轮保持可检索且不生成虚假场景关系；
 - 两条样例都通过结构引用、时间范围和单一说话者约束检查，主动说话视频保留原始音频。
 
 ## 后续顺序
 
-1. 将离线图回放中的事件生产器替换为逐帧视频推理，并测量端到端延迟与显存稳定性；
-2. 接入摄像头输入和人工纠错；
-3. 建立跨会话人物档案。
+1. 用异步 Qwen 工作者分析实时关键帧，并增量更新环境、物体和交互；
+2. 将分块主动说话人结果与 A/B/C/D 时间线写入实时人物事件；
+3. 接入摄像头输入和人工纠错；
+4. 建立跨会话人物档案。
 
 语音基线固定为 `HT-voice-lab` 标签 `voice-baseline-2026-09-28`。
