@@ -12,8 +12,8 @@
 4. 输出 `visual_tracks.json`、每个人的原始帧证据和带原音频的标注视频；
 5. 使用 LR-ASD TalkSet 权重融合嘴部运动和音频，为每张可见脸生成 25 FPS 的说话分数；
 6. 默认按首版“通常不会同时说话”的约束，每 40 毫秒只保留得分最高的人脸；
-7. 将 Sortformer 稳定后的 A/B/C/D 时间线与 Face-ID 做一对一重叠匹配，并保留全部候选证据。
-8. 用已确认的可见说话人逐条检查 A/B/C/D 串号，保留原时间线并生成可审计的纠正时间线；
+7. 将 Sortformer 稳定后的动态会话身份时间线与 Face-ID 做一对一重叠匹配，并保留全部候选证据。
+8. 用已确认的可见说话人逐条检查会话身份串号，保留原时间线并生成可审计的纠正时间线；
 9. 将视觉身份投影到语音侧匿名参与者协议，保留已有个人信息并追加可追溯的多模态证据。
 10. 在发言时间线上区分 `visible / offscreen / occluded / unknown`，并用切镜检测避免把换镜误判成遮挡。
 11. 使用 PySceneDetect 提取镜头和关键帧，并从已有的人脸轨迹生成画面位置与二维空间关系；
@@ -23,7 +23,7 @@
 15. 在本地网页中交互查看场景时间轴、关系筛选、证据详情和标注关键帧。
 16. 用人工复核的代表帧评测人物绑定、环境、物体、交互和二维空间关系。
 17. 将已有场景图按原视频时间轴投影成统一视觉事件流，并在网页中增量显示人物、场景、物体和交互。
-18. 直接按视频时间读取帧，在线建立最多 4 个 Face-ID、检测切镜、周期采集关键帧，并记录延迟与内存指标。
+18. 直接按视频时间读取帧，在线建立会话级 Face-ID 候选（默认最多 64 个）、检测切镜、周期采集关键帧，并记录延迟与内存指标；只有已确认与语音身份绑定的候选才投影为参与者。
 
 人脸检测、特征与主动说话人模型在本地运行；场景语义分析通过 Groq 云 API 调用 Qwen3.8 27B。项目将本地模型 URL 固定到上游仓库的具体 Git revision，下载后校验文件大小和 SHA-256。YuNet 和 LR-ASD 为 MIT，SFace 为 Apache-2.0；详见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
@@ -93,7 +93,7 @@ bash setup-asd.sh
   /home/sunteng/Desktop/HighTorque_vision/HT-voice-lab/results/example/speech_spans.json
 ```
 
-输入必须是声纹稳定后的 `A/B/C/D`，不接受原始 `speaker0…speaker3` 槽位。命令按时间重叠求全局一对一最优解，并输出 `confirmed`、`candidate`、`ambiguous` 或 `offscreen`；默认至少累计 3 秒一致的可见发言证据才会确认身份，较短证据仍作为候选保留。如果音频和视频片段起点不同，可用 `--timeline-offset-ms` 将语音时间整体平移后再匹配。
+输入必须是声纹稳定后的 `A/B/C/D/E…` 会话身份，不接受原始 `speaker0…speaker3` 槽位。命令按时间重叠求全局一对一最优解，并输出 `confirmed`、`candidate`、`ambiguous` 或 `offscreen`；默认至少累计 3 秒一致的可见发言证据才会确认身份，较短证据仍作为候选保留。如果音频和视频片段起点不同，可用 `--timeline-offset-ms` 将语音时间整体平移后再匹配。
 
 如果同一个语音标签落到多张可见人脸，先保留上述初始绑定，再用确认的人脸锚点纠正明显串号：
 
@@ -143,7 +143,7 @@ bash setup-asd.sh
 ./lab analyze-scenes results/example/visual_tracks.json
 ```
 
-默认生成 `scene_context.json` 和 `keyframes/`。每个镜头选择一张兼顾清晰度与可见人物的关键帧；连续移动但没有硬切镜的长镜头每 30 秒至少采样一次，可用 `--max-shot-seconds` 调整。结果记录 Face-ID、已确认的 A/B/C/D、归一化位置，以及 `left_of`、`above`、`co_visible_with`、`visually_close_to` 和画面重叠关系。关系只描述二维画面，不推断现实距离；首版有意不测量头部朝向。
+默认生成 `scene_context.json` 和 `keyframes/`。每个镜头选择一张兼顾清晰度与可见人物的关键帧；连续移动但没有硬切镜的长镜头每 30 秒至少采样一次，可用 `--max-shot-seconds` 调整。结果记录 Face-ID、已确认的会话身份、归一化位置，以及 `left_of`、`above`、`co_visible_with`、`visually_close_to` 和画面重叠关系。关系只描述二维画面，不推断现实距离；首版有意不测量头部朝向。
 
 检查场景协议：
 
@@ -178,7 +178,7 @@ bash setup-asd.sh
 ./lab validate-scene-graph results/example/multimodal_scene_graph.json
 ```
 
-`--participant-context` 可选。提供后，图会用同一份 `visual_tracks.json` 的哈希校验两条处理链确实属于同一段视频，并把已有姓名和 participant ID 放入参与者节点。只有 `confirmed` 的 A/B/C/D—Face-ID 绑定会合并为同一个参与者；有争议或未绑定的 Face-ID 作为 `visual_identity` 证据保留，不计入参与者人数，并以 `identity_candidate` 边记录候选及置信度。场景合并完全在本地执行，默认综合环境描述、物体和人物的相似度，并用重复出现的代表机位吸收短暂近景切换，避免把同一访谈按摄像机角度拆成多个场景。
+`--participant-context` 可选。提供后，图会用同一份 `visual_tracks.json` 的哈希校验两条处理链确实属于同一段视频，并把已有姓名和 participant ID 放入参与者节点。只有 `confirmed` 的会话身份—Face-ID 绑定会合并为同一个参与者；有争议或未绑定的 Face-ID 作为 `visual_identity` 证据保留，不计入参与者人数，并以 `identity_candidate` 边记录候选及置信度。场景合并完全在本地执行，默认综合环境描述、物体和人物的相似度，并用重复出现的代表机位吸收短暂近景切换，避免把同一访谈按摄像机角度拆成多个场景。
 
 打开交互式场景图：
 
@@ -210,7 +210,7 @@ bash setup-asd.sh
   data/raw/cctv-robot-life-first30.mp4 \
   --output results/live-cctv30 \
   --sample-fps 5 \
-  --max-people 4
+  --max-people 64
 ```
 
 该命令按视频原始时间运行并打开同一个增量图页面。YuNet 与 SFace 在 CPU 上完成检测、短时跟踪和会话内在线重识别；切镜生成 `scene_changed`，同一镜头超过 30 秒时生成 `scene_sampled` 并保存新关键帧，为后续异步场景语义分析提供输入。网页支持暂停和继续，处理结束后保持打开以便检查结果。
@@ -227,7 +227,7 @@ bash setup-asd.sh
 
 帧线程只负责保存关键帧并写入固定大小的语义队列，Groq 上的 Qwen 在独立线程中分析环境、物体和有直接画面证据的交互。结果到达后会生成 `node_available`、`object_detected` 和 `interaction_detected` 事件并立即更新网页；图片本身不能可靠判断发言，因此实时图像语义会过滤 `speaking` 和 `listening`，它们由主动说话人链路提供。`--semantic-queue-size` 默认保留 8 个待分析帧，积压时丢弃最旧任务；成功响应保存在 `semantic_cache/`，再次运行可直接命中缓存。Groq 网络或权限错误只会把语义状态标为 `degraded`，本地人物与切镜处理仍会完成。代理可通过 `--groq-proxy` 指定。
 
-启用分块主动说话人检测，并可选绑定语音侧 A/B/C/D：
+启用分块主动说话人检测，并可选绑定语音侧动态会话身份：
 
 ```bash
 bash setup-asd.sh
@@ -240,7 +240,7 @@ bash setup-asd.sh
   --speech-timeline /path/to/speech_spans.json
 ```
 
-主线程只累计每个 Face-ID 的时间和人脸框；LR-ASD 后台线程默认保留最多 4 秒上下文，每 1 秒发布一次新结果。它从对应视频区间插值出 25 FPS 人脸序列，结合音频输出发言片段，并为每个 Face-ID 独立维护 `started / continued / ended` 状态；某个人连续静默或消失 1 秒后才结束，其他人的发言不会替代这个判断，窗口边缘的短暂低分也会被合并。`person_speaking` 事件包含 `phase` 和从媒体时间到发布时刻的 `decision_latency_ms`。默认继续遵循首版“一次只有一位主要发言者”的约束。`--speech-timeline` 可以指向静态或持续更新的最终 A/B/C/D 时间线；每个块完成后都会重新读取该文件，累计至少 3 秒且满足覆盖率与领先幅度后才确认 Speaker—Face-ID，证据不足时保持匿名 Face-ID。LR-ASD 加载或推理失败只会使主动说话人状态降级，不中断人物和场景处理。
+主线程只累计每个 Face-ID 的时间和人脸框；LR-ASD 后台线程默认保留最多 4 秒上下文，每 1 秒发布一次新结果。它从对应视频区间插值出 25 FPS 人脸序列，结合音频输出发言片段，并为每个 Face-ID 独立维护 `started / continued / ended` 状态；某个人连续静默或消失 1 秒后才结束，其他人的发言不会替代这个判断，窗口边缘的短暂低分也会被合并。`person_speaking` 事件包含 `phase` 和从媒体时间到发布时刻的 `decision_latency_ms`。默认继续遵循首版“一次只有一位主要发言者”的约束。`--speech-timeline` 可以指向静态或持续更新的最终会话身份时间线；每个块完成后都会重新读取该文件，累计至少 3 秒且满足覆盖率与领先幅度后才确认 Speaker—Face-ID，证据不足时保持匿名 Face-ID。LR-ASD 加载或推理失败只会使主动说话人状态降级，不中断人物和场景处理。
 
 内存中的事件由 `--event-window` 限制，完整事件顺序追加到 `vision_events.jsonl`。最终结果还包括 `live_visual_graph.json`、`live_metrics.json` 和 `live_keyframes/`。指标记录近期 P50/P95 帧延迟、最大调度落后、30 秒热身后的 RSS 增长以及当前/峰值进程 GPU 显存；未启用 LR-ASD 时实时人脸与切镜路径不加载 CUDA。使用下面的命令可以加速跑完整段稳定性测试并在结束后退出：
 
@@ -254,7 +254,7 @@ bash setup-asd.sh
   --exit-on-complete
 ```
 
-实时入口现在覆盖本地人物与切镜观察、可选的异步环境/物体/交互推断、分块主动说话人检测，以及 A/B/C/D 与 Face-ID 的保守增量绑定。
+实时入口现在覆盖本地人物与切镜观察、可选的异步环境/物体/交互推断、分块主动说话人检测，以及动态会话身份与 Face-ID 的保守增量绑定。
 
 将语音记忆接入场景图：
 
@@ -272,7 +272,7 @@ bash setup-asd.sh
   --port 8765
 ```
 
-该步骤只读取版本化 JSON，不导入或调用 `HT-voice-lab` 的代码。系统通过 `multimodal_participant_context.json` 中记录的会话 ID 与 `session_memory.json` 哈希确认两条处理链属于同一场对话；人物 A/B/C/D 直接复用现有人物节点。每个观点按话轮与场景至少 120 毫秒的时间交集建立关系，跨场景的话轮会保留多条带覆盖比例的边，视觉范围以外的话轮仍进入会话图但不伪造场景关联。
+该步骤只读取版本化 JSON，不导入或调用 `HT-voice-lab` 的代码。系统通过 `multimodal_participant_context.json` 中记录的会话 ID 与 `session_memory.json` 哈希确认两条处理链属于同一场对话；动态会话身份直接复用现有人物节点。每个观点按话轮与场景至少 120 毫秒的时间交集建立关系，跨场景的话轮会保留多条带覆盖比例的边，视觉范围以外的话轮仍进入会话图但不伪造场景关联。
 
 ## 视觉基线评测
 
@@ -345,7 +345,7 @@ results/live-example/
 - `observations`：采样帧、人脸框、五点位置、质量和匹配置信度；
 - `active_speaker_scores`：每张可见脸每 40 毫秒的原始分数、概率和最终判定；
 - `active_speaker_segments`：连续的可见说话人区间；
-- `speaker_face_associations`：A/B/C/D 与 Face-ID 的状态、覆盖率、纯度、第二候选差距和原始重叠证据。
+- `speaker_face_associations`：动态会话身份与 Face-ID 的状态、覆盖率、纯度、第二候选差距和原始重叠证据。
 - `speaker_visibility_segments`：参与者在发言期间的可见、画外、疑似遮挡或未知状态。
 
 视觉辅助说话人纠正协议位于 [`schemas/reconciled_speaker_timeline.schema.json`](schemas/reconciled_speaker_timeline.schema.json)。它保留上游语音时间线的哈希、稳定视觉证据哈希和原始说话人，并只把满足阈值的视觉矛盾记录为独立 correction。

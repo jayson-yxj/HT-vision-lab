@@ -13,6 +13,7 @@ import cv2
 
 from .groq_client import chat_completion
 from .models import file_sha256
+from .speaker_face_binding import is_stable_speaker_label
 
 
 PROMPT_VERSION = "scene-semantics-qwen3.8-v3"
@@ -168,7 +169,7 @@ def _speech_context(scene: dict, warnings: List[str]) -> Tuple[List[dict], dict]
         if item.get("attribution", "single_speaker") != "single_speaker":
             continue
         speaker = item.get("speaker")
-        if speaker not in set("ABCD"):
+        if not is_stable_speaker_label(speaker):
             continue
         start = item.get("start_s", item.get("start"))
         end = item.get("end_s", item.get("end"))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -8,7 +9,12 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from .models import file_sha256
 
 
-CANONICAL_SPEAKERS = frozenset("ABCD")
+STABLE_SPEAKER_LABEL = re.compile(r"[A-Z]+")
+
+
+def is_stable_speaker_label(value: object) -> bool:
+    """Accept Voice Lab's session labels (A..Z, AA..), never raw model slots."""
+    return isinstance(value, str) and STABLE_SPEAKER_LABEL.fullmatch(value) is not None
 
 
 @dataclass(frozen=True)
@@ -59,9 +65,10 @@ def _load_speech_timeline(path: Path, duration_ms: int, offset_ms: int) -> Dict[
         speaker = item.get("speaker")
         if speaker is None or speaker == "unresolved":
             continue
-        if speaker not in CANONICAL_SPEAKERS:
+        if not is_stable_speaker_label(speaker):
             raise ValueError(
-                f"speech timeline contains non-canonical speaker {speaker!r}; use stabilized A/B/C/D output"
+                f"speech timeline contains non-canonical speaker {speaker!r}; "
+                "use stabilized session labels such as A/B/C/D/E"
             )
         if item.get("attribution", "single_speaker") != "single_speaker":
             continue
@@ -116,35 +123,44 @@ def _overlap_evidence(
 def _maximum_overlap_assignment(
     speakers: Sequence[str], faces: Sequence[str], overlaps: Dict[Tuple[str, str], int]
 ) -> Dict[str, Optional[str]]:
-    best_total = -1
-    best_signature: Optional[Tuple[str, ...]] = None
-    best_mapping: Dict[str, Optional[str]] = {}
+    """Find a maximum one-to-one match without factorial search over Face IDs."""
+    speakers = tuple(speakers)
+    empty = (None,) * len(speakers)
+    states: Dict[int, Tuple[int, Tuple[Optional[str], ...]]] = {0: (0, empty)}
 
-    def visit(index: int, used: set, total: int, mapping: Dict[str, Optional[str]]) -> None:
-        nonlocal best_total, best_signature, best_mapping
-        if index == len(speakers):
-            signature = tuple(mapping[speaker] or "~" for speaker in speakers)
-            if total > best_total or (total == best_total and (best_signature is None or signature < best_signature)):
-                best_total = total
-                best_signature = signature
-                best_mapping = dict(mapping)
-            return
-        speaker = speakers[index]
-        options = [face for face in faces if face not in used and overlaps.get((speaker, face), 0) > 0]
-        options.sort(key=lambda face: (-overlaps[(speaker, face)], face))
-        options.append(None)
-        for face in options:
-            mapping[speaker] = face
-            if face is None:
-                visit(index + 1, used, total, mapping)
-            else:
-                used.add(face)
-                visit(index + 1, used, total + overlaps[(speaker, face)], mapping)
-                used.remove(face)
-        mapping.pop(speaker, None)
+    def signature(mapping: Tuple[Optional[str], ...]) -> Tuple[str, ...]:
+        return tuple(face or "~" for face in mapping)
 
-    visit(0, set(), 0, {})
-    return best_mapping
+    for face in faces:
+        next_states = dict(states)
+        for mask, (score, mapping) in states.items():
+            for index, speaker in enumerate(speakers):
+                bit = 1 << index
+                weight = overlaps.get((speaker, face), 0)
+                if mask & bit or weight <= 0:
+                    continue
+                candidate = list(mapping)
+                candidate[index] = face
+                candidate_tuple = tuple(candidate)
+                key = mask | bit
+                current = next_states.get(key)
+                candidate_score = score + weight
+                if (
+                    current is None
+                    or candidate_score > current[0]
+                    or (
+                        candidate_score == current[0]
+                        and signature(candidate_tuple) < signature(current[1])
+                    )
+                ):
+                    next_states[key] = (candidate_score, candidate_tuple)
+        states = next_states
+
+    _, best = min(
+        states.values(),
+        key=lambda item: (-item[0], signature(item[1])),
+    )
+    return dict(zip(speakers, best))
 
 
 def bind_speakers_to_faces(
@@ -173,7 +189,9 @@ def bind_speakers_to_faces(
     duration_ms = int(data["source"]["duration_ms"])
     speech_by_speaker = _load_speech_timeline(speech_path, duration_ms, timeline_offset_ms)
     if not speech_by_speaker:
-        raise RuntimeError("speech timeline contains no final single-speaker A/B/C/D intervals in the visual range")
+        raise RuntimeError(
+            "speech timeline contains no final single-speaker stabilized intervals in the visual range"
+        )
     active_by_face: Dict[str, List[dict]] = {}
     for segment in active_segments:
         face_id = segment.get("face_id")

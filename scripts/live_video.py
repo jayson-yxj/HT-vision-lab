@@ -44,9 +44,9 @@ class OnlineFaceTracker:
         *,
         max_gap_seconds: float = 0.8,
         reid_threshold: float = 0.75,
-        cluster_threshold: float = 0.45,
+        cluster_threshold: float = 0.55,
         min_observations: int = 3,
-        max_people: int = 4,
+        max_people: int = 64,
     ) -> None:
         self.max_gap_frames = max(1, round(max_gap_seconds * fps))
         self.reid_threshold = reid_threshold
@@ -57,6 +57,10 @@ class OnlineFaceTracker:
         self.face_profiles: Dict[str, Tuple[np.ndarray, int]] = {}
         self.next_track = 1
         self.dropped_identity_candidates = 0
+
+    def start_new_scene(self) -> None:
+        """Break positional tracks at a cut while retaining session identities."""
+        self.tracks.clear()
 
     @staticmethod
     def _normalized(vector: np.ndarray) -> np.ndarray:
@@ -98,7 +102,7 @@ class OnlineFaceTracker:
             for detection_index, detection in enumerate(detections):
                 similarity = cosine_similarity(track.embedding, detection.embedding)
                 overlap = box_iou(track.box, detection.box)
-                if similarity < 0.25 or (overlap < 0.20 and similarity < self.reid_threshold):
+                if similarity < 0.45 or (overlap < 0.20 and similarity < self.reid_threshold):
                     continue
                 cost = 0.65 * (1 - similarity) + 0.30 * (1 - overlap) + 0.05 * gap_ratio
                 candidates.append((cost, track_index, detection_index))
@@ -160,6 +164,80 @@ def _frame_histogram(frame: np.ndarray) -> np.ndarray:
     return cv2.normalize(histogram, histogram)
 
 
+def _portrait_score(detection: Detection) -> float:
+    """Rank a detected face for use as a stable session portrait."""
+    points = np.asarray(detection.landmarks, dtype=np.float32)
+    frontal = 0.5
+    if points.shape[0] >= 5:
+        eyes = points[:2]
+        nose = points[2]
+        mouth = points[3:5]
+        eye_span = float(np.linalg.norm(eyes[1] - eyes[0]))
+        if eye_span >= 1.0:
+            eye_mid = np.mean(eyes, axis=0)
+            mouth_mid = np.mean(mouth, axis=0)
+            yaw = max(
+                abs(float(nose[0] - eye_mid[0])),
+                abs(float(nose[0] - mouth_mid[0])),
+            ) / eye_span
+            roll = abs(float(eyes[0][1] - eyes[1][1])) / eye_span
+            frontal = max(0.0, 1.0 - min(1.0, 1.8 * yaw + 0.8 * roll))
+    return float(detection.quality) * (0.65 + 0.35 * frontal)
+
+
+def _speaker_position_records(
+    chunk: object,
+    segments: Sequence[dict],
+    frame_width: int,
+    frame_height: int,
+) -> List[dict]:
+    """Join active-speaker segments with their sampled face positions."""
+    if frame_width <= 0 or frame_height <= 0:
+        return []
+    by_face: Dict[str, List[dict]] = {}
+    for segment in segments:
+        by_face.setdefault(str(segment.get("face_id") or ""), []).append(segment)
+    records = []
+    observations = getattr(chunk, "observations", {}) or {}
+    for face_id, items in observations.items():
+        face_segments = by_face.get(str(face_id), [])
+        if not face_segments:
+            continue
+        for observation in items:
+            timestamp_ms = int(observation.get("timestamp_ms") or 0)
+            segment = next(
+                (
+                    item for item in face_segments
+                    if int(item["start_ms"]) <= timestamp_ms < int(item["end_ms"])
+                ),
+                None,
+            )
+            box = observation.get("bbox_px")
+            if segment is None or not isinstance(box, (list, tuple)) or len(box) != 4:
+                continue
+            x, y, width, height = (float(value) for value in box)
+            left = min(1.0, max(0.0, x / frame_width))
+            top = min(1.0, max(0.0, y / frame_height))
+            normalized_width = min(1.0 - left, max(0.0, width / frame_width))
+            normalized_height = min(1.0 - top, max(0.0, height / frame_height))
+            records.append(
+                {
+                    "schema_version": 1,
+                    "timestamp_ms": timestamp_ms,
+                    "face_id": str(face_id),
+                    "bbox_normalized": [
+                        round(left, 6),
+                        round(top, 6),
+                        round(normalized_width, 6),
+                        round(normalized_height, 6),
+                    ],
+                    "score": round(float(segment.get("score") or 0), 6),
+                    "chunk_id": str(getattr(chunk, "chunk_id", "")),
+                }
+            )
+    return sorted(records, key=lambda item: (item["timestamp_ms"], item["face_id"]))
+
+
 def _rss_mb() -> float:
     try:
         pages = int(Path("/proc/self/statm").read_text().split()[1])
@@ -188,9 +266,9 @@ class LiveVideoSession:
         min_face_size: int = 24,
         max_gap_seconds: float = 0.8,
         reid_threshold: float = 0.75,
-        cluster_threshold: float = 0.45,
+        cluster_threshold: float = 0.55,
         min_track_observations: int = 3,
-        max_people: int = 4,
+        max_people: int = 64,
         scene_threshold: float = 0.45,
         min_scene_seconds: float = 1.0,
         keyframe_interval_seconds: float = 30.0,
@@ -267,6 +345,8 @@ class LiveVideoSession:
         self.semantic_path.write_text("", encoding="utf-8")
         self.active_speaker_path = self.output_dir / "live_active_speaker.jsonl"
         self.active_speaker_path.write_text("", encoding="utf-8")
+        self.speaker_position_path = self.output_dir / "live_speaker_positions.jsonl"
+        self.speaker_position_path.write_text("", encoding="utf-8")
         self.binding_path = self.output_dir / "live_speaker_bindings.json"
         self.video_sha256 = file_sha256(self.video_path)
 
@@ -373,6 +453,7 @@ class LiveVideoSession:
         self._active_speaker_failed = 0
         self._active_speaker_dropped = 0
         self._active_speaker_latency_total = 0.0
+        self._speaker_position_samples = 0
         self._speaking_state_machine = None
         self._speaking_phase_counts = {"started": 0, "continued": 0, "ended": 0}
         self._speaking_start_latencies = deque(maxlen=1000)
@@ -1422,6 +1503,19 @@ class LiveVideoSession:
                     )
                     + "\n"
                 )
+            position_records = _speaker_position_records(
+                chunk,
+                normalized,
+                self.width,
+                self.height,
+            )
+            if position_records:
+                with self.speaker_position_path.open("a", encoding="utf-8") as handle:
+                    handle.writelines(
+                        json.dumps(item, ensure_ascii=False) + "\n"
+                        for item in position_records
+                    )
+                self._speaker_position_samples += len(position_records)
             self._revision += 1
             self.progress(
                 f"LR-ASD completed {chunk.chunk_id}: segments={len(normalized)}, "
@@ -1478,6 +1572,7 @@ class LiveVideoSession:
                 round(width / self.width, 6),
                 round(height / self.height, 6),
             ]
+            portrait_score = round(_portrait_score(detection), 6)
             if node_id not in self._nodes:
                 self._nodes[node_id] = {
                     "id": node_id,
@@ -1494,6 +1589,18 @@ class LiveVideoSession:
                         "identity_status": "visual_only",
                         "latest_bbox_normalized": normalized_box,
                         "last_seen_ms": timestamp_ms,
+                        "representative_bbox_normalized": normalized_box,
+                        "representative_ms": timestamp_ms,
+                        "representative_score": portrait_score,
+                        "representative_track_id": track.track_id,
+                        "portrait_candidates": [
+                            {
+                                "bbox_normalized": normalized_box,
+                                "timestamp_ms": timestamp_ms,
+                                "score": portrait_score,
+                                "track_id": track.track_id,
+                            }
+                        ],
                     },
                 }
             else:
@@ -1501,6 +1608,32 @@ class LiveVideoSession:
                 node["confidence"] = max(node["confidence"], round(detection.score, 6))
                 node["attributes"]["latest_bbox_normalized"] = normalized_box
                 node["attributes"]["last_seen_ms"] = timestamp_ms
+                if portrait_score > float(node["attributes"].get("representative_score") or -1):
+                    node["attributes"]["representative_bbox_normalized"] = normalized_box
+                    node["attributes"]["representative_ms"] = timestamp_ms
+                    node["attributes"]["representative_score"] = portrait_score
+                    node["attributes"]["representative_track_id"] = track.track_id
+                candidates = node["attributes"].setdefault("portrait_candidates", [])
+                current = next(
+                    (
+                        item
+                        for item in candidates
+                        if item.get("track_id") == track.track_id
+                    ),
+                    None,
+                )
+                candidate = {
+                    "bbox_normalized": normalized_box,
+                    "timestamp_ms": timestamp_ms,
+                    "score": portrait_score,
+                    "track_id": track.track_id,
+                }
+                if current is None:
+                    candidates.append(candidate)
+                elif portrait_score > float(current.get("score") or -1):
+                    current.update(candidate)
+                candidates.sort(key=lambda item: float(item.get("score") or 0), reverse=True)
+                del candidates[48:]
                 if track.track_id not in node["evidence_refs"]:
                     node["evidence_refs"].append(track.track_id)
             key = (node_id, self._current_scene_id)
@@ -1591,22 +1724,24 @@ class LiveVideoSession:
                         raise RuntimeError(f"video decoding failed at frame {frame_index}")
                     started = time.monotonic()
                     detections = _detect(detector, recognizer, frame, self.min_face_size)
-                    tracked = self.tracker.update(detections, frame_index)
                     histogram = _frame_histogram(frame)
+                    scene_change = self._current_scene_id is None
+                    if self._previous_histogram is not None:
+                        distance = cv2.compareHist(
+                            self._previous_histogram,
+                            histogram,
+                            cv2.HISTCMP_BHATTACHARYYA,
+                        )
+                        scene_change = scene_change or (
+                            timestamp_ms - self._current_scene_start >= self.min_scene_ms
+                            and distance >= self.scene_threshold
+                        )
+                    if scene_change and self._current_scene_id is not None:
+                        self.tracker.start_new_scene()
+                    tracked = self.tracker.update(detections, frame_index)
                     with self._condition:
                         if self._stop:
                             break
-                        scene_change = self._current_scene_id is None
-                        if self._previous_histogram is not None:
-                            distance = cv2.compareHist(
-                                self._previous_histogram,
-                                histogram,
-                                cv2.HISTCMP_BHATTACHARYYA,
-                            )
-                            scene_change = scene_change or (
-                                timestamp_ms - self._current_scene_start >= self.min_scene_ms
-                                and distance >= self.scene_threshold
-                            )
                         if scene_change:
                             self._start_scene(timestamp_ms, frame, tracked, event_file)
                         elif timestamp_ms - self._last_keyframe_ms >= self.keyframe_interval_ms:
@@ -1639,7 +1774,7 @@ class LiveVideoSession:
                             )
                             self.progress(
                                 f"{timestamp_ms / 1000:.1f}/{self.duration_ms / 1000:.1f}s, "
-                                f"faces={len(self.tracker.face_profiles)}, "
+                                f"visual_candidates={len(self.tracker.face_profiles)}, "
                                 f"scenes={scene_count}, "
                                 f"latency={latency_ms:.1f}ms"
                             )
@@ -1748,6 +1883,7 @@ class LiveVideoSession:
             "failed_chunks": self._active_speaker_failed,
             "dropped_chunks": self._active_speaker_dropped,
             "segments": len(self._active_segments),
+            "position_samples": self._speaker_position_samples,
             "events_by_phase": dict(self._speaking_phase_counts),
             "decision_latency_ms": {
                 "started_p50": round(_percentile(start_latencies, 0.50), 3),

@@ -18,6 +18,18 @@ def test_global_assignment_avoids_greedy_face_conflict() -> None:
     assert mapping == {"A": "Face-02", "B": "Face-01"}
 
 
+def test_assignment_supports_five_speakers_and_many_visual_candidates() -> None:
+    speakers = list("ABCDE")
+    faces = [f"Face-{index:02d}" for index in range(1, 19)]
+    expected = {speaker: faces[index + 10] for index, speaker in enumerate(speakers)}
+    overlaps = {
+        (speaker, face): (5000 if face == expected[speaker] else 0)
+        for speaker in speakers
+        for face in faces
+    }
+    assert _maximum_overlap_assignment(speakers, faces, overlaps) == expected
+
+
 def test_one_to_one_binding_and_offscreen_status() -> None:
     visual = {
         "source": {"duration_ms": 4000},
@@ -76,7 +88,7 @@ def test_rejects_raw_sortformer_slots() -> None:
         try:
             bind_speakers_to_faces(visual_path, speech_path)
         except ValueError as error:
-            assert "stabilized A/B/C/D" in str(error)
+            assert "stabilized session labels" in str(error)
         else:
             raise AssertionError("raw Sortformer slot was accepted")
 
@@ -106,6 +118,7 @@ def test_default_keeps_short_visual_evidence_as_candidate() -> None:
 
 if __name__ == "__main__":
     test_global_assignment_avoids_greedy_face_conflict()
+    test_assignment_supports_five_speakers_and_many_visual_candidates()
     test_one_to_one_binding_and_offscreen_status()
     test_rejects_raw_sortformer_slots()
     test_default_keeps_short_visual_evidence_as_candidate()

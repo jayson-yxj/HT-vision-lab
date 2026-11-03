@@ -89,7 +89,7 @@ def validate_evaluation_annotations(data: dict) -> list[str]:
             continue
         speaker = binding.get("speaker_label")
         face = binding.get("face_id")
-        if speaker not in {"A", "B", "C", "D"}:
+        if not isinstance(speaker, str) or re.fullmatch(r"[A-Z]+", speaker) is None:
             errors.append(f"identity_bindings[{index}] has an invalid speaker label")
         if not isinstance(face, str) or re.fullmatch(r"Face-[0-9]{2}", face) is None:
             errors.append(f"identity_bindings[{index}] has an invalid face ID")

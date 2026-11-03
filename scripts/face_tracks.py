@@ -571,7 +571,7 @@ def analyze_video(
     reid_threshold: float = 0.75,
     cluster_threshold: float = 0.45,
     min_track_observations: int = 3,
-    max_people: int = 4,
+    max_people: int = 64,
     render: bool = True,
 ) -> dict:
     if sample_fps <= 0:

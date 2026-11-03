@@ -26,9 +26,12 @@ def _parser() -> argparse.ArgumentParser:
     track.add_argument("--min-face-size", type=int, default=24)
     track.add_argument("--max-gap-seconds", type=float, default=0.8)
     track.add_argument("--reid-threshold", type=float, default=0.75)
-    track.add_argument("--cluster-threshold", type=float, default=0.45)
+    track.add_argument("--cluster-threshold", type=float, default=0.55)
     track.add_argument("--min-track-observations", type=int, default=3)
-    track.add_argument("--max-people", type=int, default=4)
+    track.add_argument(
+        "--max-people", type=int, default=64,
+        help="Maximum session-wide Face IDs; this is not a concurrent-speaker limit",
+    )
     track.add_argument("--no-render", action="store_true", help="Skip annotated video output")
 
     validate = commands.add_parser("validate", help="Check visual_tracks.json references and ranges")
@@ -51,7 +54,7 @@ def _parser() -> argparse.ArgumentParser:
     active.add_argument("--no-render", action="store_true")
 
     binding = commands.add_parser(
-        "bind-speakers", help="Bind stabilized A/B/C/D speech intervals to visual Face IDs"
+        "bind-speakers", help="Bind stabilized session speaker intervals to visual Face IDs"
     )
     binding.add_argument("visual_json", type=Path)
     binding.add_argument("speech_json", type=Path)
@@ -68,7 +71,7 @@ def _parser() -> argparse.ArgumentParser:
 
     reconciliation = commands.add_parser(
         "reconcile-speakers",
-        help="Use confirmed visible speakers to correct conflicting A/B/C/D spans",
+        help="Use confirmed visible speakers to correct conflicting session speaker spans",
     )
     reconciliation.add_argument("visual_json", type=Path)
     reconciliation.add_argument("speech_json", type=Path)
@@ -236,9 +239,12 @@ def _parser() -> argparse.ArgumentParser:
     live.add_argument("--min-face-size", type=int, default=24)
     live.add_argument("--max-gap-seconds", type=float, default=0.8)
     live.add_argument("--reid-threshold", type=float, default=0.75)
-    live.add_argument("--cluster-threshold", type=float, default=0.45)
+    live.add_argument("--cluster-threshold", type=float, default=0.55)
     live.add_argument("--min-track-observations", type=int, default=3)
-    live.add_argument("--max-people", type=int, default=4)
+    live.add_argument(
+        "--max-people", type=int, default=64,
+        help="Maximum session-wide Face IDs; this is not a concurrent-speaker limit",
+    )
     live.add_argument("--scene-threshold", type=float, default=0.45)
     live.add_argument("--min-scene-seconds", type=float, default=1.0)
     live.add_argument("--keyframe-interval-seconds", type=float, default=30.0)
@@ -277,7 +283,7 @@ def _parser() -> argparse.ArgumentParser:
     live.add_argument(
         "--speech-timeline",
         type=Path,
-        help="Optional finalized A/B/C/D timeline used for incremental Face-ID binding",
+        help="Optional finalized session speaker timeline used for incremental Face-ID binding",
     )
     live.add_argument("--timeline-offset-ms", type=int, default=0)
     live.add_argument("--binding-min-evidence-ms", type=int, default=3000)

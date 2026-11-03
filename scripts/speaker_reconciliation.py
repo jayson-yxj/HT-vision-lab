@@ -8,10 +8,10 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from .models import file_sha256
 from .speaker_face_binding import (
-    CANONICAL_SPEAKERS,
     _interval_duration,
     _time_value,
     bind_speakers_to_faces,
+    is_stable_speaker_label,
 )
 
 
@@ -133,7 +133,7 @@ def reconcile_speakers(
         span["id"] = span_id
         speaker = span.get("speaker")
         if (
-            speaker not in CANONICAL_SPEAKERS
+            not is_stable_speaker_label(speaker)
             or span.get("attribution", "single_speaker") != "single_speaker"
             or span.get("status", "final") != "final"
         ):
@@ -349,7 +349,7 @@ def validate_reconciled_timeline(data: dict) -> List[str]:
             errors.append(f"{item.get('correction_id')} references unknown speech span")
         if item.get("original_speaker") == item.get("resolved_speaker"):
             errors.append(f"{item.get('correction_id')} does not change the speaker")
-        if item.get("resolved_speaker") not in CANONICAL_SPEAKERS:
+        if not is_stable_speaker_label(item.get("resolved_speaker")):
             errors.append(f"{item.get('correction_id')} has invalid resolved speaker")
         if int(item.get("end_ms", 0)) <= int(item.get("start_ms", 0)):
             errors.append(f"{item.get('correction_id')} has invalid time range")

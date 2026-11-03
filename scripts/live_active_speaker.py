@@ -197,7 +197,7 @@ def _sequence_specs(
 
 
 class OnlineSpeakerBinder:
-    """Recompute conservative A/B/C/D-to-Face bindings from accumulated segments."""
+    """Recompute conservative session-speaker-to-Face bindings from accumulated segments."""
 
     def __init__(
         self,
